@@ -23,7 +23,14 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
-    logging.getLogger("paxen.worker").info("worker started: recorder, monitor, training")
+    import os
+
+    from .config import settings
+
+    logging.getLogger("paxen.worker").info(
+        "worker started: recorder, monitor, training | code %s | provider %s | modes %s | region %s",
+        (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "local")[:7], settings.provider, ",".join(settings.record_modes),
+        os.getenv("RAILWAY_REPLICA_REGION") or "?")
     await stop.wait()
     for t in tasks:
         t.cancel()

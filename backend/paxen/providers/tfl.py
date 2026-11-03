@@ -236,6 +236,7 @@ class TflProvider:
         self._journey_cache: dict[tuple, tuple[float, list[Journey]]] = {}
         self._crowd_cache: dict[tuple, tuple[float, object]] = {}
         self._arrivals_cache: dict[str, tuple[float, FetchResult]] = {}
+        self.last_response_meta: dict = {}
 
     def _get(self, path: str, params: dict | None = None) -> tuple[object, str, int, int]:
         params = dict(params or {})
@@ -243,6 +244,10 @@ class TflProvider:
             params["app_key"] = self.app_key
         t0 = time.monotonic()
         r = self.client.get(f"{self.base}{path}", params=params)
+        self.last_response_meta = {
+            "bytes": len(r.content), "status": r.status_code, "x_cache": r.headers.get("x-cache"),
+            "age": r.headers.get("age"), "keyed": "app_key" in params,
+        }
         if self.app_key and r.status_code in (401, 403, 429) and "invalid app_key" in r.text.lower():
             # A wrong/revoked key must not take the app offline: fall back to anonymous access (50 req/min).
             log.error("TfL rejected TFL_APP_KEY (%s). Falling back to anonymous access; check the key.", r.text[:80])

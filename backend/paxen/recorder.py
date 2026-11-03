@@ -164,7 +164,12 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
     if peak > 200 and len(res.items) < peak * 0.4:
         log.warning("network poll for %s returned %d predictions (recent peak %d): partial upstream data?",
                     mode, len(res.items), int(peak))
-    return {"mode": mode, "seen": len(res.items), "kept": len(rows), "archived": bool(key)}
+    out = {"mode": mode, "seen": len(res.items), "kept": len(rows), "archived": bool(key)}
+    meta = getattr(provider, "last_response_meta", None)
+    if meta:  # diagnostics: what TfL actually sent (size, cache state)
+        out.update(kb=meta["bytes"] // 1000, x_cache=meta["x_cache"], keyed=meta["keyed"],
+                   stops=len({a.stop_id for a in res.items}))
+    return out
 
 
 def archive_network(s: Session, provider: Provider, mode: str, now: datetime, archive=None) -> dict:
