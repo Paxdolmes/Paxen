@@ -30,6 +30,7 @@ DEFAULT_MODES = "tube,overground,elizabeth-line,dlr,bus,national-rail,walking"
 # bus-only, surfaces the genuinely different alternatives a commuter would consider during disruption.
 ALT_MODE_SETS = [DEFAULT_MODES, "overground,elizabeth-line,dlr,bus,national-rail,tram,walking", "bus,walking"]
 JOURNEY_CACHE_S = 120
+ARRIVALS_CACHE_S = 20
 STATUS_MODES = "tube,overground,elizabeth-line,dlr,national-rail"
 
 # TfL statusSeverity codes -> normalised categories.
@@ -207,6 +208,7 @@ class TflProvider:
         self.client = httpx.Client(timeout=timeout, headers={"User-Agent": "paxen-commute/0.1"})
         self._journey_cache: dict[tuple, tuple[float, list[Journey]]] = {}
         self._crowd_cache: dict[tuple, tuple[float, object]] = {}
+        self._arrivals_cache: dict[str, tuple[float, FetchResult]] = {}
 
     def _get(self, path: str, params: dict | None = None) -> tuple[object, str, int, int]:
         params = dict(params or {})
@@ -224,10 +226,16 @@ class TflProvider:
         r.raise_for_status()
         return r.json(), r.text, r.status_code, latency
 
-    def arrivals(self, stop_id: str, now: datetime) -> FetchResult:
+    def arrivals(self, stop_id: str, now: datetime, max_age_s: float = ARRIVALS_CACHE_S) -> FetchResult:
+        """Live arrivals. Shared across users/requests for a few seconds (TfL itself refreshes ~every 30s)."""
+        hit = self._arrivals_cache.get(stop_id)
+        if hit and time.monotonic() - hit[0] < max_age_s:
+            return hit[1]
         path = f"/StopPoint/{stop_id}/Arrivals"
         data, raw, status, latency = self._get(path)
-        return FetchResult(parse_arrivals(data, stop_id), raw, path, status, latency)
+        res = FetchResult(parse_arrivals(data, stop_id), raw, path, status, latency)
+        self._arrivals_cache[stop_id] = (time.monotonic(), res)
+        return res
 
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult:
         path = f"/Line/{','.join(line_ids)}/Status" if line_ids else f"/Line/Mode/{STATUS_MODES}/Status"

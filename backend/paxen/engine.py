@@ -16,6 +16,7 @@ import math
 import statistics
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -66,6 +67,21 @@ class NetworkContext:
     model: CorrectionModel
     feed_fresh: bool = True
     _arrivals: dict[str, list[Arrival] | None] = field(default_factory=dict)
+
+    def prefetch(self, stop_ids: set[str]) -> None:
+        """Fetch live arrivals for many stops in parallel (one evaluation touches several boarding stops)."""
+        todo = [sid for sid in stop_ids if sid and sid not in self._arrivals]
+        if len(todo) < 2:
+            return
+        with ThreadPoolExecutor(max_workers=min(8, len(todo))) as pool:
+            for sid, res in zip(todo, pool.map(self._fetch, todo)):
+                self._arrivals[sid] = res
+
+    def _fetch(self, stop_id: str) -> list[Arrival] | None:
+        try:
+            return self.provider.arrivals(stop_id, self.now).items
+        except Exception:
+            return None
 
     def arrivals(self, stop_id: str | None) -> list[Arrival] | None:
         if not stop_id:
@@ -403,6 +419,8 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
         journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
     except Exception:
         journeys = []
+    if depart_at - now <= timedelta(minutes=LIVE_HORIZON_MIN):
+        ctx.prefetch({l.from_stop_id for j in journeys for l in j.transit_legs if l.from_stop_id})
     forecasts = [forecast_journey(j, ctx, depart_at) for j in journeys]
     watch_stops(s, {l.from_stop_id: l.from_name for j in journeys for l in j.transit_legs if l.from_stop_id}, now)
 

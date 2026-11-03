@@ -9,9 +9,19 @@ def _bool(name: str, default: bool) -> bool:
     return default if v is None else v.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def normalise_db_url(url: str) -> str:
+    """Hosts hand out postgres:// URLs; SQLAlchemy needs the driver named (psycopg 3)."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
 @dataclass
 class Settings:
-    database_url: str = field(default_factory=lambda: os.getenv("PAXEN_DATABASE_URL", "sqlite:///./paxen.db"))
+    # PAXEN_DATABASE_URL wins; DATABASE_URL is what Railway/Render/Heroku-style hosts inject.
+    database_url: str = field(default_factory=lambda: normalise_db_url(
+        os.getenv("PAXEN_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./paxen.db"))
     # "sim" = built-in simulated London network (works offline); "tfl" = TfL Unified API.
     provider: str = field(default_factory=lambda: os.getenv("PAXEN_PROVIDER", "sim"))
     tfl_app_key: str | None = field(default_factory=lambda: os.getenv("TFL_APP_KEY"))

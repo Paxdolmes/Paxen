@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _tmp = tempfile.mkdtemp()
-os.environ["PAXEN_DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+# Set PAXEN_TEST_DATABASE_URL (e.g. postgresql://postgres@/paxen?host=/tmp&port=5433) to run against Postgres.
+TEST_DB = os.environ.get("PAXEN_TEST_DATABASE_URL")
+os.environ["PAXEN_DATABASE_URL"] = TEST_DB or f"sqlite:///{_tmp}/test.db"
 os.environ["PAXEN_RUN_WORKERS"] = "0"
 os.environ["PAXEN_PROVIDER"] = "sim"
 os.environ["PAXEN_SIM_SCENARIO"] = "normal"
@@ -25,9 +27,11 @@ WORK = (51.5141, -0.1405)  # Regent Street
 
 @pytest.fixture
 def session():
-    eng = make_engine("sqlite://")
+    eng = make_engine(TEST_DB or "sqlite://")
+    Base.metadata.drop_all(eng)
     Base.metadata.create_all(eng)
     s = sessionmaker(bind=eng, expire_on_commit=False)()
     clear_status_cache()
     yield s
     s.close()
+    eng.dispose()

@@ -63,7 +63,10 @@ def record_statuses(s: Session, provider: Provider, now: datetime) -> dict[str, 
 def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime, cats: dict[str, str]) -> int:
     polled = naive_utc(now)
     try:
-        res = provider.arrivals(stop_id, now)
+        try:
+            res = provider.arrivals(stop_id, now, max_age_s=0)  # the recorder always wants a fresh snapshot
+        except TypeError:  # providers without a cache
+            res = provider.arrivals(stop_id, now)
     except Exception as e:
         s.add(RawSnapshot(source=provider.name, endpoint=f"arrivals:{stop_id}", polled_at=polled, status=0,
                           error=str(e)))

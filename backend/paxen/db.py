@@ -8,7 +8,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-from .config import settings
+from .config import normalise_db_url, settings
 from .timeutil import naive_utc, utcnow
 
 
@@ -198,7 +198,7 @@ class ModelVersion(Base):
 
 
 def make_engine(url: str | None = None):
-    url = url or settings.database_url
+    url = normalise_db_url(url or settings.database_url)
     kw = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {"pool_pre_ping": True}
     return create_engine(url, **kw)
 

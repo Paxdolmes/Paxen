@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Literal
@@ -20,7 +21,8 @@ from .config import settings
 from .db import Alert, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
 from .engine import (
-    PREFERENCES, clear_status_cache, current_statuses, evaluate_commute, maybe_alert, route_key, set_usual,
+    PREFERENCES, clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
+    set_usual,
 )
 from .insights import insights as build_insights
 from .notify import deliver
@@ -364,6 +366,22 @@ def set_usual_route(commute_id: str, body: UsualIn, u: User = Depends(current_us
     return ser.commute(c)
 
 
+def _warm_journeys(commutes: list[Commute], t: datetime) -> None:
+    """Plan every commute's journeys in parallel; the provider caches them for the evaluations that follow."""
+    if len(commutes) < 2:
+        return
+    p = get_provider()
+
+    def plan(c: Commute):
+        try:
+            p.journeys((c.origin.lat, c.origin.lon), (c.dest.lat, c.dest.lon), default_depart_at(c, t))
+        except Exception:
+            pass  # evaluation will retry and report unavailability properly
+
+    with ThreadPoolExecutor(max_workers=len(commutes)) as pool:
+        list(pool.map(plan, commutes))
+
+
 def _eval_dict(s, c, t, depart_at=None, preference=None, max_options=None):
     ev = evaluate_commute(s, get_provider(), c, t, depart_at=depart_at, preference=preference,
                           feed_fresh=_feed_fresh(s, t))
@@ -382,6 +400,7 @@ def compare(commute_id: str, preference: Pref | None = None, depart_at: datetime
 def dashboard(u: User = Depends(current_user), s: Session = Depends(db)):
     t = now()
     commutes = list(s.scalars(select(Commute).where(Commute.user_id == u.id).order_by(Commute.window_start)))
+    _warm_journeys(commutes, t)
     evals = [_eval_dict(s, c, t, max_options=3) for c in commutes]
     # The "current" commute: the one in its window, else the next one today, else the first.
     m = local(t).hour * 60 + local(t).minute

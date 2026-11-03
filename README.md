@@ -61,10 +61,12 @@ cd backend && pytest -q
 |---|---|---|
 | `PAXEN_PROVIDER` | `sim` | `sim` or `tfl` |
 | `TFL_APP_KEY` | – | TfL Unified API key |
-| `PAXEN_DATABASE_URL` | `sqlite:///./paxen.db` | any SQLAlchemy URL (PostgreSQL recommended in production) |
-| `PAXEN_RUN_WORKERS` | `1` | run recorder / monitor / training loops inside the API process |
+| `PAXEN_DATABASE_URL` / `DATABASE_URL` | `sqlite:///./paxen.db` | database; `postgres://…` URLs from Railway/Render work as-is |
+| `PAXEN_RUN_WORKERS` | `1` | run recorder / monitor / training inside the API process (set `0` in production and run `python -m paxen.worker`) |
 | `PAXEN_POLL_INTERVAL` | `30` | seconds between feed polls |
 | `PAXEN_SIM_SCENARIO` | `auto` | `auto`, `normal`, `victoria-severe`, `victoria-suspended`, `central-minor`, `weaver-suspended`, `mixed` |
 | `PAXEN_CORS_ORIGINS` | `*` | comma-separated allowed origins |
+
+Deploying (Railway + Vercel, step by step): [docs/deploy.md](docs/deploy.md).
 
 See [docs/product.md](docs/product.md) for how the brief maps to the code, and what was added or cut.
