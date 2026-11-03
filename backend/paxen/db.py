@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from sqlalchemy import (
+    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+
+from .config import settings
+from .timeutil import naive_utc, utcnow
+
+
+def _id() -> str:
+    return uuid.uuid4().hex
+
+
+def _now() -> datetime:
+    return naive_utc(utcnow())
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+# ---------------------------------------------------------------- users & routine
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    name: Mapped[str | None] = mapped_column(String(80))
+    push_token: Mapped[str | None] = mapped_column(String(255))
+    quiet_start: Mapped[str] = mapped_column(String(5), default="22:00")
+    quiet_end: Mapped[str] = mapped_column(String(5), default="06:30")
+    monitoring_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    alert_threshold_min: Mapped[int] = mapped_column(Integer, default=8)  # how much slower than normal before we alert
+    min_gain_min: Mapped[int] = mapped_column(Integer, default=5)  # how much better an alternative must be
+    places = relationship("Place", cascade="all, delete-orphan", back_populates="user")
+    commutes = relationship("Commute", cascade="all, delete-orphan", back_populates="user")
+
+
+class Place(Base):
+    __tablename__ = "places"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(20))  # home | work | other
+    name: Mapped[str] = mapped_column(String(120))
+    lat: Mapped[float] = mapped_column(Float)  # stored at ~11 m precision (data minimisation)
+    lon: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | pin | saved | inferred
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    user = relationship("User", back_populates="places")
+
+
+class Commute(Base):
+    __tablename__ = "commutes"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    origin_id: Mapped[str] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"))
+    dest_id: Mapped[str] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"))
+    days: Mapped[list] = mapped_column(JSON, default=lambda: [0, 1, 2, 3, 4])  # Mon=0
+    window_start: Mapped[str] = mapped_column(String(5), default="08:00")
+    window_end: Mapped[str] = mapped_column(String(5), default="08:45")
+    preference: Mapped[str] = mapped_column(String(20), default="balanced")
+    usual_signature: Mapped[str | None] = mapped_column(Text)
+    usual_summary: Mapped[str | None] = mapped_column(String(200))
+    usual_nominal_min: Mapped[float | None] = mapped_column(Float)
+    alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    user = relationship("User", back_populates="commutes")
+    origin = relationship("Place", foreign_keys=[origin_id])
+    dest = relationship("Place", foreign_keys=[dest_id])
+
+
+class Trip(Base):
+    """What actually happened: the learning loop's ground truth for personal baselines."""
+    __tablename__ = "trips"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    commute_id: Mapped[str | None] = mapped_column(ForeignKey("commutes.id", ondelete="SET NULL"), index=True)
+    signature: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(String(200))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime)
+    duration_min: Mapped[float | None] = mapped_column(Float)
+    forecast_p10: Mapped[float | None] = mapped_column(Float)
+    forecast_p50: Mapped[float | None] = mapped_column(Float)
+    forecast_p90: Mapped[float | None] = mapped_column(Float)
+    followed_alert_id: Mapped[str | None] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(20), default="app")  # app | manual | detected
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    commute_id: Mapped[str | None] = mapped_column(ForeignKey("commutes.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    kind: Mapped[str] = mapped_column(String(30))  # better_route | leave_earlier | usual_unavailable
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(String(10))
+    delta_min: Mapped[float | None] = mapped_column(Float)
+    gain_min: Mapped[float | None] = mapped_column(Float)
+    recommended_signature: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    delivered: Mapped[str] = mapped_column(String(20), default="inbox")  # inbox | push | push_failed
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback: Mapped[str | None] = mapped_column(String(20))  # useful | not_useful | inaccurate
+    feedback_note: Mapped[str | None] = mapped_column(Text)
+
+
+# ------------------------------------------------------------------- data recorder
+class RawSnapshot(Base):
+    __tablename__ = "raw_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(10))
+    endpoint: Mapped[str] = mapped_column(String(300))
+    polled_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[int] = mapped_column(Integer)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    item_count: Mapped[int] = mapped_column(Integer, default=0)
+    payload: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class Prediction(Base):
+    __tablename__ = "predictions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(10))
+    raw_id: Mapped[int | None] = mapped_column(ForeignKey("raw_snapshots.id", ondelete="SET NULL"))
+    polled_at: Mapped[datetime] = mapped_column(DateTime)
+    feed_ts: Mapped[datetime | None] = mapped_column(DateTime)
+    stop_id: Mapped[str] = mapped_column(String(40))
+    line_id: Mapped[str] = mapped_column(String(40))
+    mode: Mapped[str] = mapped_column(String(20))
+    direction: Mapped[str | None] = mapped_column(String(120))
+    vehicle_id: Mapped[str] = mapped_column(String(60))
+    expected_arrival: Mapped[datetime] = mapped_column(DateTime)
+    tts_s: Mapped[int] = mapped_column(Integer)
+    line_category: Mapped[str] = mapped_column(String(20), default="good")
+    __table_args__ = (
+        Index("ix_pred_vehicle", "source", "stop_id", "line_id", "vehicle_id", "polled_at"),
+        Index("ix_pred_polled", "polled_at"),
+    )
+
+
+class ObservedArrival(Base):
+    """An arrival we believe happened. `method` says how we know — never treat inferred as measured."""
+    __tablename__ = "observed_arrivals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(10))
+    stop_id: Mapped[str] = mapped_column(String(40))
+    line_id: Mapped[str] = mapped_column(String(40))
+    vehicle_id: Mapped[str] = mapped_column(String(60))
+    arrived_at: Mapped[datetime] = mapped_column(DateTime)
+    earliest: Mapped[datetime] = mapped_column(DateTime)
+    latest: Mapped[datetime] = mapped_column(DateTime)
+    method: Mapped[str] = mapped_column(String(30))  # countdown_inferred | feed_reported | avl_position
+    quality: Mapped[float] = mapped_column(Float)
+    __table_args__ = (Index("ix_obs_vehicle", "source", "stop_id", "line_id", "vehicle_id", "arrived_at"),)
+
+
+class LineStatusSnapshot(Base):
+    __tablename__ = "line_status_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(10))
+    polled_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    line_id: Mapped[str] = mapped_column(String(40), index=True)
+    line_name: Mapped[str] = mapped_column(String(80))
+    mode: Mapped[str] = mapped_column(String(20))
+    category: Mapped[str] = mapped_column(String(20))
+    description: Mapped[str] = mapped_column(String(120))
+    reason: Mapped[str | None] = mapped_column(Text)
+
+
+class WatchedStop(Base):
+    """Stops the recorder polls: boarding points of users' candidate routes, plus pilot corridor stops."""
+    __tablename__ = "watched_stops"
+    stop_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(120))
+    last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class ModelVersion(Base):
+    __tablename__ = "model_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    kind: Mapped[str] = mapped_column(String(40))
+    params: Mapped[dict] = mapped_column(JSON)
+    metrics: Mapped[dict] = mapped_column(JSON)
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+def make_engine(url: str | None = None):
+    url = url or settings.database_url
+    kw = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {"pool_pre_ping": True}
+    return create_engine(url, **kw)
+
+
+engine = make_engine()
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def init_db(eng=None) -> None:
+    Base.metadata.create_all(eng or engine)
