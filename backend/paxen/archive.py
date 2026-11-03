@@ -75,9 +75,23 @@ def get_archive():
     raise ValueError(f"Unsupported PAXEN_ARCHIVE_URL scheme: {u.scheme}")
 
 
+_warned: set[str] = set()
+
+
+def _warn_once(msg: str) -> None:
+    if msg not in _warned:
+        _warned.add(msg)
+        log.error(msg)
+
+
 def archive_raw(source: str, name: str, when: datetime, raw: str | bytes, archive=None) -> str | None:
     """Compress and store one raw response. Never raises: a storage outage must not stop recording."""
-    archive = archive if archive is not None else get_archive()
+    if archive is None:
+        try:
+            archive = get_archive()
+        except Exception as e:  # misconfigured PAXEN_ARCHIVE_URL / AWS_* settings: keep recording, say why
+            _warn_once(f"archive disabled: {e}. Check PAXEN_ARCHIVE_URL and AWS_ENDPOINT_URL.")
+            return None
     if archive is None or not raw:
         return None
     try:

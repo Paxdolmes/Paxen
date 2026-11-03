@@ -96,3 +96,15 @@ def test_archive_only_poll_is_invisible_to_arrival_inference(session, tmp_path):
     snap = session.scalars(select(RawSnapshot)).one()
     assert snap.endpoint == "/Mode/bus/Arrivals?archive-only" and snap.archive_key.startswith("file://")
     assert infer_arrivals(session, "sim", MORNING + timedelta(minutes=1)) == 0
+
+
+def test_misconfigured_archive_never_breaks_recording(session, monkeypatch):
+    import paxen.archive as arch
+    import paxen.recorder as rec
+
+    def broken():
+        raise ValueError("Invalid endpoint: https://….r2.cloudflarestorage.com")
+
+    monkeypatch.setattr(arch, "get_archive", broken)
+    r = rec.record_network(session, SimProvider("normal"), "tube", MORNING, {}, sampler=LeadSampler())
+    assert r["kept"] > 0 and r["archived"] is False

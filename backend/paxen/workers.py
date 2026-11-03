@@ -36,7 +36,12 @@ def archive_tick() -> list[dict]:
     from .recorder import archive_network
 
     provider = get_provider()
-    if get_archive() is None or not hasattr(provider, "mode_arrivals_raw"):
+    try:
+        archive = get_archive()
+    except Exception as e:
+        log.error("archive disabled: %s", e)
+        return []
+    if archive is None or not hasattr(provider, "mode_arrivals_raw"):
         return []
     with SessionLocal() as s:
         return [archive_network(s, provider, m, utcnow()) for m in settings.archive_only_modes]
@@ -88,8 +93,13 @@ def start(loop_tasks: list) -> None:
     loop_tasks.append(asyncio.create_task(_loop(train_tick, settings.train_interval_s, "train")))
     from .archive import get_archive
 
+    try:
+        archive_ok = get_archive() is not None
+    except Exception as e:
+        log.error("archive misconfigured (%s): recording continues without the raw archive", e)
+        archive_ok = False
     if settings.archive_only_modes:
-        if get_archive() is None:
+        if not archive_ok:
             log.warning("PAXEN_ARCHIVE_ONLY_MODES=%s set but PAXEN_ARCHIVE_URL is not: skipping the bus archive",
                         settings.archive_only_modes)
         else:
