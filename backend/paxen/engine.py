@@ -126,8 +126,11 @@ class JourneyForecast:
         return self.depart_at + timedelta(minutes=self.p50)
 
 
+TERMINUS_TURNAROUND_S = 150  # a train terminating at the boarding stop departs again after reversing
+
+
 def _matches_direction(a: Arrival, leg_direction: str | None) -> bool:
-    if not leg_direction:
+    if not leg_direction or a.terminates_here:
         return True
     d = leg_direction.lower()
     return a.direction.lower() in d or d in a.direction.lower() or a.destination.lower() in d
@@ -168,6 +171,8 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                         continue
                     p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, cat != GOOD)
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
+                    if a.terminates_here:
+                        when += timedelta(seconds=TERMINUS_TURNAROUND_S)
                     cands.append((when, p))
                 cands.sort(key=lambda c: c[0])
                 upcoming = [round((w - board_at).total_seconds() / 60, 1) for w, _ in cands

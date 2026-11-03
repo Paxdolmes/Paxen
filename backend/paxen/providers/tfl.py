@@ -10,6 +10,7 @@ before production use — see docs/data-sources.md.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import httpx
@@ -21,6 +22,10 @@ from ..domain import (
 from ..timeutil import LONDON
 
 DEFAULT_MODES = "tube,overground,elizabeth-line,dlr,bus,national-rail,walking"
+# TfL's planner tends to return near-identical variants of one route. Asking again without the Tube, and
+# bus-only, surfaces the genuinely different alternatives a commuter would consider during disruption.
+ALT_MODE_SETS = [DEFAULT_MODES, "overground,elizabeth-line,dlr,bus,national-rail,tram,walking", "bus,walking"]
+JOURNEY_CACHE_S = 120
 STATUS_MODES = "tube,overground,elizabeth-line,dlr,national-rail"
 
 # TfL statusSeverity codes -> normalised categories.
@@ -49,23 +54,34 @@ def _dt(s: str | None) -> datetime | None:
 
 
 def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
-    out = []
+    """Normalise TfL arrivals.
+
+    At a terminus TfL lists each incoming train once per platform it might use; we keep one row per
+    (line, vehicle) — the earliest — and flag trains that terminate here (they form the next departure).
+    """
+    best: dict[tuple[str, str], Arrival] = {}
     for a in payload:
         exp, ts = _dt(a.get("expectedArrival")), _dt(a.get("timestamp"))
         if not exp:
             continue
-        out.append(Arrival(
+        naptan = a.get("naptanId") or stop_id
+        dest_id = a.get("destinationNaptanId")
+        terminates = bool(dest_id and dest_id == naptan)
+        arr = Arrival(
             vehicle_id=str(a.get("vehicleId") or a.get("id")),
-            stop_id=a.get("naptanId") or stop_id,
+            stop_id=naptan,
             stop_name=a.get("stationName", ""),
             line_id=a.get("lineId", ""), line_name=a.get("lineName", ""), mode=a.get("modeName", ""),
             direction=a.get("destinationName") or a.get("direction") or "",
             destination=a.get("destinationName", ""),
             expected_arrival=exp, time_to_station_s=int(a.get("timeToStation", 0)),
             feed_timestamp=ts or datetime.now(timezone.utc), platform=a.get("platformName"),
-        ))
-    out.sort(key=lambda x: x.time_to_station_s)
-    return out
+            terminates_here=terminates,
+        )
+        key = (arr.line_id, arr.vehicle_id)
+        if key not in best or arr.time_to_station_s < best[key].time_to_station_s:
+            best[key] = arr
+    return sorted(best.values(), key=lambda x: x.time_to_station_s)
 
 
 def parse_statuses(payload: list[dict]) -> list[LineStatus]:
@@ -99,8 +115,8 @@ def parse_journeys(payload: dict) -> list[Journey]:
                 departure=dep, arrival=arr,
                 line_id=line.get("id") if mode != "walking" else None,
                 line_name=line.get("name") or route.get("name") if mode != "walking" else None,
-                from_stop_id=dp.get("naptanId") or dp.get("icsCode"),
-                to_stop_id=ap.get("naptanId") or ap.get("icsCode"),
+                from_stop_id=dp.get("naptanId"),  # icsCode is a planner id; it is not valid for arrivals
+                to_stop_id=ap.get("naptanId"),
                 direction=directions[0] if directions else None,
                 stops=len((l.get("path") or {}).get("stopPoints") or []) or None,
             ))
@@ -111,6 +127,40 @@ def parse_journeys(payload: dict) -> list[Journey]:
     return out
 
 
+def dedupe_journeys(journeys: list[Journey]) -> list[Journey]:
+    """One journey per route signature (the quickest), ordered by duration."""
+    best: dict[str, Journey] = {}
+    for j in journeys:
+        if j.signature not in best or j.duration_min < best[j.signature].duration_min:
+            best[j.signature] = j
+    return sorted(best.values(), key=lambda j: j.duration_min)
+
+
+_NAME_SUFFIXES = (" underground station", " rail station", " dlr station", " station")
+
+
+def _clean_name(name: str) -> str:
+    low = name.lower()
+    for suf in _NAME_SUFFIXES:
+        if low.endswith(suf):
+            return name[: -len(suf)]
+    return name
+
+
+def parse_place_search(payload: dict) -> list[PlaceResult]:
+    out, seen = [], set()
+    for m in payload.get("matches", []):
+        if "lat" not in m:
+            continue
+        name = _clean_name(m.get("name", ""))
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        out.append(PlaceResult(name, m["lat"], m["lon"], "station", stop_id=m.get("id"),
+                               detail=", ".join(m.get("modes", [])) or None))
+    return out[:10]
+
+
 class TflProvider:
     name = "tfl"
 
@@ -118,6 +168,7 @@ class TflProvider:
         self.base = base_url.rstrip("/")
         self.app_key = app_key
         self.client = httpx.Client(timeout=timeout, headers={"User-Agent": "paxen-commute/0.1"})
+        self._journey_cache: dict[tuple, tuple[float, list[Journey]]] = {}
 
     def _get(self, path: str, params: dict | None = None) -> tuple[object, str, int, int]:
         params = dict(params or {})
@@ -141,15 +192,29 @@ class TflProvider:
 
     def journeys(self, origin, dest, depart_at):
         loc = depart_at.astimezone(LONDON)
+        key = (round(origin[0], 4), round(origin[1], 4), round(dest[0], 4), round(dest[1], 4),
+               loc.strftime("%Y%m%d%H") + str(loc.minute // 5))
+        hit = self._journey_cache.get(key)
+        if hit and time.monotonic() - hit[0] < JOURNEY_CACHE_S:
+            return list(hit[1])
         path = f"/Journey/JourneyResults/{origin[0]:.5f},{origin[1]:.5f}/to/{dest[0]:.5f},{dest[1]:.5f}"
-        data, *_ = self._get(path, {
-            "date": loc.strftime("%Y%m%d"), "time": loc.strftime("%H%M"), "timeIs": "Departing",
-            "mode": DEFAULT_MODES, "journeyPreference": "LeastTime", "alternativeRoute": "true",
-        })
-        return parse_journeys(data)
+        params = {"date": loc.strftime("%Y%m%d"), "time": loc.strftime("%H%M"), "timeIs": "Departing",
+                  "journeyPreference": "LeastTime", "alternativeRoute": "true"}
+        with ThreadPoolExecutor(max_workers=len(ALT_MODE_SETS)) as pool:
+            futures = [pool.submit(self._get, path, {**params, "mode": m}) for m in ALT_MODE_SETS]
+        found: list[Journey] = []
+        for i, fut in enumerate(futures):
+            try:
+                data, *_ = fut.result()
+            except httpx.HTTPError:
+                if i == 0:
+                    raise  # the main query must work; alternatives are best-effort
+                continue
+            found += parse_journeys(data)
+        out = dedupe_journeys(found)
+        self._journey_cache[key] = (time.monotonic(), out)
+        return list(out)
 
     def search_places(self, query: str) -> list[PlaceResult]:
-        data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 10})
-        return [PlaceResult(m.get("name", ""), m["lat"], m["lon"], "station", stop_id=m.get("id"),
-                            detail=", ".join(m.get("modes", [])))
-                for m in data.get("matches", []) if "lat" in m]
+        data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 15})
+        return parse_place_search(data)

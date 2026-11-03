@@ -26,6 +26,8 @@ class Arrival:
     time_to_station_s: int
     feed_timestamp: datetime
     platform: str | None = None
+    # True when the vehicle terminates at this stop and will reverse to form a departure (e.g. a line's end).
+    terminates_here: bool = False
 
 
 @dataclass

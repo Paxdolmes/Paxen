@@ -66,3 +66,49 @@ def test_parse_journeys():
     assert j.signature == "tube:victoria@940GZZLUWWL"
     assert j.legs[1].direction == "Brixton Underground Station" and j.legs[1].stops == 9
     assert j.departure.utcoffset().total_seconds() == 0  # London local in November == UTC
+
+
+TERMINUS = [  # Walthamstow Central: TfL lists each incoming train once per possible platform
+    {"vehicleId": "236", "naptanId": "940GZZLUWWL", "lineId": "victoria", "lineName": "Victoria",
+     "platformName": "Southbound - Platform 1", "destinationNaptanId": "940GZZLUWWL",
+     "destinationName": "Walthamstow Central Underground Station", "timeToStation": 70,
+     "expectedArrival": "2026-11-03T08:06:10Z", "timestamp": "2026-11-03T08:05:00Z", "modeName": "tube"},
+    {"vehicleId": "236", "naptanId": "940GZZLUWWL", "lineId": "victoria", "lineName": "Victoria",
+     "platformName": "Southbound - Platform 2", "destinationNaptanId": "940GZZLUWWL",
+     "destinationName": "Walthamstow Central Underground Station", "timeToStation": 129,
+     "expectedArrival": "2026-11-03T08:07:09Z", "timestamp": "2026-11-03T08:05:00Z", "modeName": "tube"},
+]
+
+
+def test_terminus_duplicates_collapse_and_are_flagged():
+    [a] = parse_arrivals(TERMINUS, "940GZZLUWWL")
+    assert a.time_to_station_s == 70 and a.terminates_here
+
+
+def test_terminating_train_counts_as_next_departure():
+    from datetime import datetime, timezone
+    from paxen.engine import _matches_direction
+    [a] = parse_arrivals(TERMINUS, "940GZZLUWWL")
+    assert _matches_direction(a, "Brixton Underground Station")
+    [b] = parse_arrivals(ARRIVALS[:1], "940GZZLUWWL")
+    assert not b.terminates_here
+
+
+def test_journeys_deduplicated_by_route():
+    from copy import deepcopy
+    from paxen.providers.tfl import dedupe_journeys
+    slower = deepcopy(JOURNEYS)
+    slower["journeys"][0]["duration"] = 40
+    out = dedupe_journeys(parse_journeys(JOURNEYS) + parse_journeys(slower) + parse_journeys(JOURNEYS))
+    assert len(out) == 1 and out[0].duration_min == 33
+
+
+def test_place_search_dedupes_station_names():
+    from paxen.providers.tfl import parse_place_search
+    res = parse_place_search({"matches": [
+        {"name": "Walthamstow Central Underground Station", "lat": 51.58, "lon": -0.02, "id": "940GZZLUWWL",
+         "modes": ["tube"]},
+        {"name": "Walthamstow Central Station", "lat": 51.58, "lon": -0.02, "id": "910GWLTWCEN"},
+        {"name": "Walthamstow Queens Road Rail Station", "lat": 51.58, "lon": -0.02, "id": "910GWLTHQRD"},
+    ]})
+    assert [r.name for r in res] == ["Walthamstow Central", "Walthamstow Queens Road"]
