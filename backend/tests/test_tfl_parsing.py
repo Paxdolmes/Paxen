@@ -112,3 +112,46 @@ def test_place_search_dedupes_station_names():
         {"name": "Walthamstow Queens Road Rail Station", "lat": 51.58, "lon": -0.02, "id": "910GWLTHQRD"},
     ]})
     assert [r.name for r in res] == ["Walthamstow Central", "Walthamstow Queens Road"]
+
+
+SECTION_STATUS = [{
+    "id": "elizabeth", "name": "Elizabeth line", "modeName": "elizabeth-line",
+    "lineStatuses": [{"statusSeverity": 6, "statusSeverityDescription": "Severe Delays",
+                      "reason": "Severe delays between Paddington and Heathrow.",
+                      "disruption": {"affectedStops": [{"naptanId": "910GACTONML"}, {"naptanId": "910GEALINGB"}]}}],
+}]
+
+
+def test_section_disruption_only_hits_legs_that_call_there():
+    [st] = parse_statuses(SECTION_STATUS)
+    assert st.category == SEVERE  # the line, as a whole, has severe delays
+    assert st.category_for(["910GLIVST", "910GFRNDXR", "910GTOTCTRD"]) == GOOD  # central section unaffected
+    assert st.category_for(["910GPADTON", "910GACTONML", "910GEALINGB"]) == SEVERE
+    assert st.category_for([]) == SEVERE  # leg without stop detail: stay conservative
+
+
+def test_journey_legs_carry_stop_ids():
+    from copy import deepcopy
+    data = deepcopy(JOURNEYS)
+    data["journeys"][0]["legs"][1]["path"]["stopPoints"] = [{"id": "940GZZLUBLR"}, {"id": "940GZZLUOXC"}]
+    leg = parse_journeys(data)[0].legs[1]
+    assert leg.stop_ids == ["940GZZLUWWL", "940GZZLUBLR", "940GZZLUOXC"]
+
+
+def test_invalid_key_falls_back_to_anonymous():
+    import httpx
+    from paxen.providers.tfl import TflProvider
+
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append("app_key" in req.url.params)
+        if "app_key" in req.url.params:
+            return httpx.Response(429, text="Invalid app_key is provided.")
+        return httpx.Response(200, json=STATUS)
+
+    p = TflProvider("https://api.tfl.gov.uk", "your-500-requests-primary-key")
+    p.client = httpx.Client(transport=httpx.MockTransport(handler))
+    from datetime import datetime, timezone
+    res = p.line_statuses(datetime.now(timezone.utc))
+    assert len(res.items) == 4 and seen == [True, False] and p.app_key is None

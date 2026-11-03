@@ -81,6 +81,11 @@ class NetworkContext:
         st = self.statuses.get(line_id or "")
         return st.category if st else GOOD
 
+    def leg_category(self, leg) -> str:
+        """Status for the stretch of line this leg actually uses."""
+        st = self.statuses.get(leg.line_id or "")
+        return st.category_for(leg.stop_ids) if st else GOOD
+
 
 # ------------------------------------------------------------------- journey forecast
 @dataclass
@@ -151,7 +156,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
             legs.append(LegForecast("walking", None, None, leg.from_name, leg.to_name, None, 0, leg.duration_min,
                                     0.08 * leg.duration_min, False, GOOD))
             continue
-        cat = ctx.category(leg.line_id)
+        cat = ctx.leg_category(leg)
         if cat != GOOD:
             st = ctx.statuses[leg.line_id]
             disruptions[leg.line_id] = {"line_id": leg.line_id, "line_name": st.line_name, "category": cat,
@@ -220,11 +225,13 @@ def crowding_estimate(j: Journey, ctx: NetworkContext, depart_at: datetime) -> d
     if not j.transit_legs:
         return {"level": "n/a", "label": "No public transport", "basis": None}
     band = hour_band(depart_at)
-    cats = [ctx.category(l.line_id) for l in j.transit_legs]
+    cats = [ctx.leg_category(l) for l in j.transit_legs]
     peak = band in ("am_peak", "pm_peak")
     if peak and any(c in (SEVERE, PART_SUSPENDED) for c in cats):
         level, label = "very_busy", "Likely very busy"
-    elif peak and rail and any(st.category in (SEVERE, PART_SUSPENDED, SUSPENDED) for st in ctx.statuses.values()):
+    elif peak and rail and any(st.category in (SEVERE, PART_SUSPENDED, SUSPENDED)
+                               and not any(sec.stops for sec in st.sections)  # local problems don't spill over
+                               for st in ctx.statuses.values()):
         # A nearby line is badly disrupted: displaced passengers spill onto the alternatives.
         level, label = "busier", "Likely busier than usual"
     elif peak and rail:

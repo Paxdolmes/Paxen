@@ -13,13 +13,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import logging
+
 import httpx
 
 from ..domain import (
     GOOD, MINOR, PART_SUSPENDED, SEVERE, SEVERITY_ORDER, SUSPENDED,
-    Arrival, FetchResult, Journey, Leg, LineStatus, PlaceResult,
+    Arrival, FetchResult, Journey, Leg, LineStatus, PlaceResult, StatusSection,
 )
 from ..timeutil import LONDON
+
+log = logging.getLogger("paxen.tfl")
 
 DEFAULT_MODES = "tube,overground,elizabeth-line,dlr,bus,national-rail,walking"
 # TfL's planner tends to return near-identical variants of one route. Asking again without the Tube, and
@@ -85,15 +89,24 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
 
 
 def parse_statuses(payload: list[dict]) -> list[LineStatus]:
+    """Requires `?detail=true` for section detail; without it every disruption is treated as line-wide."""
     out = []
     for line in payload:
         statuses = line.get("lineStatuses") or [{"statusSeverity": 10, "statusSeverityDescription": "Good Service"}]
         worst = max(statuses, key=lambda s: SEVERITY_ORDER[_SEVERITY.get(s.get("statusSeverity", 10), MINOR)])
         cat = _SEVERITY.get(worst.get("statusSeverity", 10), MINOR)
+        sections = []
+        for st in statuses:
+            c = _SEVERITY.get(st.get("statusSeverity", 10), MINOR)
+            if c == GOOD:
+                continue
+            affected = (st.get("disruption") or {}).get("affectedStops") or []
+            ids = frozenset(a.get("naptanId") or a.get("stationNaptan") for a in affected) - {None}
+            sections.append(StatusSection(c, ids))
         out.append(LineStatus(
             line_id=line["id"], line_name=line.get("name", line["id"]), mode=line.get("modeName", ""),
             category=cat, description=worst.get("statusSeverityDescription", ""),
-            reason=worst.get("reason"), severity_code=worst.get("statusSeverity"),
+            reason=worst.get("reason"), severity_code=worst.get("statusSeverity"), sections=sections,
         ))
     return out
 
@@ -109,6 +122,9 @@ def parse_journeys(payload: dict) -> list[Journey]:
             dep, arr = _dt(l.get("departureTime")), _dt(l.get("arrivalTime"))
             dp, ap = l.get("departurePoint") or {}, l.get("arrivalPoint") or {}
             directions = route.get("directions") or []
+            path_points = (l.get("path") or {}).get("stopPoints") or []
+            path_ids = [sp["id"] for sp in path_points if sp.get("id")]
+            first = dp.get("naptanId")
             legs.append(Leg(
                 mode=mode, duration_min=float(l.get("duration", 0)),
                 from_name=dp.get("commonName", ""), to_name=ap.get("commonName", ""),
@@ -118,7 +134,8 @@ def parse_journeys(payload: dict) -> list[Journey]:
                 from_stop_id=dp.get("naptanId"),  # icsCode is a planner id; it is not valid for arrivals
                 to_stop_id=ap.get("naptanId"),
                 direction=directions[0] if directions else None,
-                stops=len((l.get("path") or {}).get("stopPoints") or []) or None,
+                stops=len(path_points) or None,
+                stop_ids=([first] if first else []) + path_ids,
             ))
         if not legs:
             continue
@@ -176,6 +193,12 @@ class TflProvider:
             params["app_key"] = self.app_key
         t0 = time.monotonic()
         r = self.client.get(f"{self.base}{path}", params=params)
+        if self.app_key and r.status_code in (401, 403, 429) and "invalid app_key" in r.text.lower():
+            # A wrong/revoked key must not take the app offline: fall back to anonymous access (50 req/min).
+            log.error("TfL rejected TFL_APP_KEY (%s). Falling back to anonymous access; check the key.", r.text[:80])
+            self.app_key = None
+            params.pop("app_key", None)
+            r = self.client.get(f"{self.base}{path}", params=params)
         latency = int((time.monotonic() - t0) * 1000)
         r.raise_for_status()
         return r.json(), r.text, r.status_code, latency
@@ -187,7 +210,7 @@ class TflProvider:
 
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult:
         path = f"/Line/{','.join(line_ids)}/Status" if line_ids else f"/Line/Mode/{STATUS_MODES}/Status"
-        data, raw, status, latency = self._get(path)
+        data, raw, status, latency = self._get(path, {"detail": "true"})
         return FetchResult(parse_statuses(data), raw, path, status, latency)
 
     def journeys(self, origin, dest, depart_at):

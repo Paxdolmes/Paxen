@@ -31,14 +31,38 @@ class Arrival:
 
 
 @dataclass
+class StatusSection:
+    """One disruption on a line. Empty `stops` means the provider didn't say where: assume the whole line."""
+    category: str
+    stops: frozenset[str] = frozenset()
+
+
+@dataclass
 class LineStatus:
     line_id: str
     line_name: str
     mode: str
-    category: str
+    category: str  # worst category anywhere on the line
     description: str
     reason: str | None = None
     severity_code: int | None = None
+    sections: list[StatusSection] = field(default_factory=list)
+
+    def category_for(self, stop_ids: list[str] | None) -> str:
+        """Worst category affecting a journey leg that calls at `stop_ids`.
+
+        A disruption limited to listed stops only applies if the leg calls at one of them. With no
+        section detail (or no stop ids for the leg) we stay conservative and apply the line-wide status.
+        """
+        if not self.sections or not stop_ids:
+            return self.category
+        legs = set(stop_ids)
+        worst = GOOD
+        for sec in self.sections:
+            if not sec.stops or sec.stops & legs:
+                if SEVERITY_ORDER[sec.category] > SEVERITY_ORDER[worst]:
+                    worst = sec.category
+        return worst
 
 
 @dataclass
@@ -56,6 +80,7 @@ class Leg:
     direction: str | None = None
     headway_min: float | None = None
     stops: int | None = None
+    stop_ids: list[str] = field(default_factory=list)  # every stop the leg calls at, boarding stop first
 
     @property
     def is_transit(self) -> bool:
