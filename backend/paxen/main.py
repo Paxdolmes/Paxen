@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -36,6 +37,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.database_url.startswith("sqlite") and os.getenv("RAILWAY_ENVIRONMENT"):
+        logging.getLogger("paxen").warning(
+            "No DATABASE_URL set: using a temporary SQLite file. Add a Postgres database and set "
+            "DATABASE_URL=${{Postgres.DATABASE_URL}} so data survives redeploys.")
     init_db()
     tasks: list[asyncio.Task] = []
     if settings.run_workers:
