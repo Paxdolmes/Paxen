@@ -49,9 +49,10 @@ class Settings:
     ).split(",") if m.strip()])
     # Modes too large for the database (buses: ~100 MB per poll) are archived whole on a slower cycle.
     # Needs PAXEN_ARCHIVE_URL; buses on users' routes are still recorded in detail in the database.
-    archive_only_modes: list[str] = field(default_factory=lambda: [m.strip() for m in os.getenv(
-        "PAXEN_ARCHIVE_ONLY_MODES", "bus" if _provider() == "tfl" else "",
-    ).split(",") if m.strip()])
+    # Off unless asked for (PAXEN_ARCHIVE_ONLY_MODES=bus): ~6 GB/day of archive and upload costs.
+    archive_only_modes: list[str] = field(default_factory=lambda: [
+        m.strip() for m in os.getenv("PAXEN_ARCHIVE_ONLY_MODES", "").split(",")
+        if m.strip() and m.strip().lower() not in {"none", "off"}])
     archive_only_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_ARCHIVE_ONLY_INTERVAL", "120")))
     cors_origins: list[str] = field(
         default_factory=lambda: [o.strip() for o in os.getenv("PAXEN_CORS_ORIGINS", "*").split(",") if o.strip()]
