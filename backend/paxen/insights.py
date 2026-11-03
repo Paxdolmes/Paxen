@@ -9,14 +9,15 @@ from sqlalchemy.orm import Session
 
 from .db import Alert, ModelVersion, Trip
 from .engine import route_key
+from .forecast import model_kind
 from .recorder import feed_health
 from .timeutil import naive_utc
 
 
-def model_summary(s: Session) -> dict:
-    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == "arrival_correction")
+def model_summary(s: Session, source: str = "sim") -> dict:
+    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source))
                    .order_by(ModelVersion.id.desc())).first()
-    active = s.scalars(select(ModelVersion).where(ModelVersion.kind == "arrival_correction",
+    active = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source),
                                                   ModelVersion.active.is_(True)).order_by(ModelVersion.id.desc())).first()
     if not mv:
         return {"status": "no_model", "message": "Collecting data — the correction model trains once enough arrivals "
@@ -65,6 +66,7 @@ def personal_summary(s: Session, user_id: str, now: datetime) -> dict:
     }
 
 
-def insights(s: Session, user_id: str, now: datetime) -> dict:
-    return {"personal": personal_summary(s, user_id, now), "model": model_summary(s), "feed": feed_health(s, now),
+def insights(s: Session, user_id: str, now: datetime, source: str = "sim") -> dict:
+    return {"personal": personal_summary(s, user_id, now), "model": model_summary(s, source),
+            "feed": feed_health(s, now, source),
             "alerts_total": s.scalar(select(func.count(Alert.id)).where(Alert.user_id == user_id)) or 0}

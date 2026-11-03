@@ -68,3 +68,33 @@ def test_inference_uses_platform_time_and_skips_terminus_layovers(session):
     obs = {o.vehicle_id: o for o in session.scalars(select(ObservedArrival))}
     assert set(obs) == {"A"}
     assert obs["A"].arrived_at == t0 + timedelta(seconds=60 + 20)  # first at-platform poll + its countdown
+
+
+def test_simulator_model_never_used_for_live_data(session):
+    from paxen.forecast import active_model
+    backfill_recorder(session, SimProvider("normal"), MORNING, hours=3, stops=STOPS)
+    assert train_and_maybe_promote(session, "sim")["status"] == "promoted"
+    assert active_model(session, "sim").version is not None
+    assert active_model(session, "tfl").version is None  # live TfL data gets no correction from sim training
+
+
+def test_purge_removes_simulator_rows(session):
+    from paxen.recorder import purge_source
+    backfill_recorder(session, SimProvider("normal"), MORNING, hours=0.2, stops=STOPS)
+    counts = purge_source(session, "sim")
+    assert counts["predictions"] > 0
+    assert session.scalar(select(ObservedArrival).limit(1)) is None
+
+
+def test_provider_setting_is_strict_but_forgiving(monkeypatch):
+    import pytest
+    from paxen.config import _provider
+    for raw, want in [("tfl", "tfl"), (" TfL ", "tfl"), ("sim", "sim"), (None, "sim")]:
+        if raw is None:
+            monkeypatch.delenv("PAXEN_PROVIDER", raising=False)
+        else:
+            monkeypatch.setenv("PAXEN_PROVIDER", raw)
+        assert _provider() == want
+    monkeypatch.setenv("PAXEN_PROVIDER", "tlf")
+    with pytest.raises(ValueError):
+        _provider()

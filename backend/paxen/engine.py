@@ -413,7 +413,7 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     preference = preference or commute.preference or "balanced"
     depart_at = depart_at or default_depart_at(commute, now)
     statuses = current_statuses(provider, now)
-    ctx = NetworkContext(provider, now, statuses, active_model(s), feed_fresh)
+    ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name), feed_fresh)
     o, d = commute.origin, commute.dest
     try:
         journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)

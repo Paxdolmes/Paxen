@@ -191,7 +191,7 @@ def _own(s: Session, model, id_: str, u: User):
 
 
 def _feed_fresh(s: Session, t: datetime) -> bool:
-    h = feed_health(s, t)
+    h = feed_health(s, t, get_provider().name)
     return h["fresh"] or h["last_success_at"] is None  # before the recorder's first poll, don't penalise
 
 
@@ -200,7 +200,7 @@ def _feed_fresh(s: Session, t: datetime) -> bool:
 def health(s: Session = Depends(db)):
     p = get_provider()
     return {"ok": True, "provider": p.name, "simulated": isinstance(p, SimProvider),
-            "scenario": getattr(p, "scenario", None), "feed": feed_health(s, now())}
+            "scenario": getattr(p, "scenario", None), "feed": feed_health(s, now(), p.name)}
 
 
 # ------------------------------------------------------------------------ account
@@ -415,7 +415,7 @@ def dashboard(u: User = Depends(current_user), s: Session = Depends(db)):
     p = get_provider()
     return {
         "generated_at": t.isoformat(), "user": ser.user(u), "provider": p.name,
-        "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t),
+        "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t, p.name),
         "active_commute_id": active["commute"]["id"] if active else None,
         "commutes": evals, "network": _network(t, evals), "unread_alerts": unread,
     }
@@ -447,7 +447,7 @@ def network_status(u: User = Depends(current_user), s: Session = Depends(db)):
     for n in net:
         n["on_my_routes"] = n["line_id"] in lines
     net.sort(key=lambda x: (not x["on_my_routes"], -SEVERITY_ORDER[x["category"]], x["line_name"]))
-    return {"generated_at": t.isoformat(), "lines": net, "feed": feed_health(s, t)}
+    return {"generated_at": t.isoformat(), "lines": net, "feed": feed_health(s, t, get_provider().name)}
 
 
 # -------------------------------------------------------------------------- trips
@@ -519,7 +519,7 @@ def alert_feedback(alert_id: str, body: FeedbackIn, u: User = Depends(current_us
 # ----------------------------------------------------------------------- insights
 @app.get("/v1/insights")
 def get_insights(u: User = Depends(current_user), s: Session = Depends(db)):
-    return build_insights(s, u.id, now())
+    return build_insights(s, u.id, now(), get_provider().name)
 
 
 # ---------------------------------------------------------- demo / simulator controls

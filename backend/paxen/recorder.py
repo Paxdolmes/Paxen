@@ -321,15 +321,31 @@ def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None
     s.commit()
 
 
-def feed_health(s: Session, now: datetime) -> dict:
-    last = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status > 0))
-    last_err = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status == 0))
+def feed_health(s: Session, now: datetime, source: str | None = None) -> dict:
+    src = (RawSnapshot.source == source) if source else True
+    last = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status > 0, src))
+    last_err = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status == 0, src))
     age = (aware(now) - aware(last)).total_seconds() if last else None
     return {
         "last_success_at": aware(last).isoformat() if last else None,
         "last_error_at": aware(last_err).isoformat() if last_err else None,
         "age_s": round(age) if age is not None else None,
         "fresh": age is not None and age < 180,
-        "predictions_recorded": s.scalar(select(func.count(Prediction.id))) or 0,
-        "observed_arrivals": s.scalar(select(func.count(ObservedArrival.id))) or 0,
+        "predictions_recorded": s.scalar(select(func.count(Prediction.id)).where(
+            (Prediction.source == source) if source else True)) or 0,
+        "observed_arrivals": s.scalar(select(func.count(ObservedArrival.id)).where(
+            (ObservedArrival.source == source) if source else True)) or 0,
     }
+
+
+def purge_source(s: Session, source: str) -> dict:
+    """Delete every recorded row from one data source (e.g. simulator data left in a production database)."""
+    from .db import ModelVersion
+
+    counts = {}
+    for model in (Prediction, ObservedArrival, LineStatusSnapshot, RawSnapshot):
+        counts[model.__tablename__] = s.query(model).filter(model.source == source).delete(synchronize_session=False)
+    counts["model_versions"] = s.query(ModelVersion).filter(
+        ModelVersion.kind.in_([f"arrival_correction:{source}", "arrival_correction"])).delete(synchronize_session=False)
+    s.commit()
+    return counts

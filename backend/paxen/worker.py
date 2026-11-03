@@ -27,7 +27,19 @@ async def main() -> None:
 
     from .config import settings
 
-    logging.getLogger("paxen.worker").info(
+    log = logging.getLogger("paxen.worker")
+    if os.getenv("RAILWAY_ENVIRONMENT") and settings.provider == "sim":
+        log.error("PAXEN_PROVIDER is %r on Railway: recording SIMULATED data, not TfL. Set PAXEN_PROVIDER=tfl.",
+                  os.getenv("PAXEN_PROVIDER"))
+    if settings.provider == "tfl":
+        from .db import SessionLocal
+        from .recorder import purge_source
+
+        with SessionLocal() as s:
+            purged = purge_source(s, "sim")
+        if any(purged.values()):
+            log.warning("removed simulator data from the live database: %s", purged)
+    log.info(
         "worker started: recorder, monitor, training | code %s | provider %s | modes %s | region %s",
         (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "local")[:7], settings.provider, ",".join(settings.record_modes),
         os.getenv("RAILWAY_REPLICA_REGION") or "?")

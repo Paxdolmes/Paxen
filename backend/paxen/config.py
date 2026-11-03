@@ -9,6 +9,15 @@ def _bool(name: str, default: bool) -> bool:
     return default if v is None else v.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _provider() -> str:
+    """PAXEN_PROVIDER, tolerant of case/whitespace; anything unrecognised is an error, not a silent simulator."""
+    raw = os.getenv("PAXEN_PROVIDER")
+    value = (raw or "sim").strip().lower()
+    if value not in {"sim", "tfl"}:
+        raise ValueError(f"PAXEN_PROVIDER must be 'tfl' or 'sim', got {raw!r}")
+    return value
+
+
 def normalise_db_url(url: str) -> str:
     """Hosts hand out postgres:// URLs; SQLAlchemy needs the driver named (psycopg 3)."""
     for prefix in ("postgres://", "postgresql://"):
@@ -23,7 +32,7 @@ class Settings:
     database_url: str = field(default_factory=lambda: normalise_db_url(
         os.getenv("PAXEN_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./paxen.db"))
     # "sim" = built-in simulated London network (works offline); "tfl" = TfL Unified API.
-    provider: str = field(default_factory=lambda: os.getenv("PAXEN_PROVIDER", "sim"))
+    provider: str = field(default_factory=lambda: _provider())
     tfl_app_key: str | None = field(default_factory=lambda: os.getenv("TFL_APP_KEY"))
     tfl_base_url: str = field(default_factory=lambda: os.getenv("TFL_BASE_URL", "https://api.tfl.gov.uk"))
     run_workers: bool = field(default_factory=lambda: _bool("PAXEN_RUN_WORKERS", True))
@@ -36,12 +45,12 @@ class Settings:
     record_modes: list[str] = field(default_factory=lambda: [m.strip() for m in os.getenv(
         "PAXEN_RECORD_MODES",
         # DLR is left out: TfL's DLR predictions carry no vehicle id, so arrivals can't be tracked.
-        "tube,overground,elizabeth-line,tram" if os.getenv("PAXEN_PROVIDER", "sim") == "tfl" else "",
+        "tube,overground,elizabeth-line,tram" if _provider() == "tfl" else "",
     ).split(",") if m.strip()])
     # Modes too large for the database (buses: ~100 MB per poll) are archived whole on a slower cycle.
     # Needs PAXEN_ARCHIVE_URL; buses on users' routes are still recorded in detail in the database.
     archive_only_modes: list[str] = field(default_factory=lambda: [m.strip() for m in os.getenv(
-        "PAXEN_ARCHIVE_ONLY_MODES", "bus" if os.getenv("PAXEN_PROVIDER", "sim") == "tfl" else "",
+        "PAXEN_ARCHIVE_ONLY_MODES", "bus" if _provider() == "tfl" else "",
     ).split(",") if m.strip()])
     archive_only_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_ARCHIVE_ONLY_INTERVAL", "120")))
     cors_origins: list[str] = field(

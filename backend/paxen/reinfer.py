@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 
 from .config import settings
 from .db import ModelVersion, ObservedArrival, Prediction, SessionLocal, init_db
-from .forecast import train_and_maybe_promote
+from .forecast import model_kind, train_and_maybe_promote
 from .recorder import infer_arrivals
 from .timeutil import aware
 
@@ -37,7 +37,7 @@ def main() -> None:
     source = "tfl" if settings.provider == "tfl" else "sim"
     with SessionLocal() as s:
         n = reinfer(s, source)
-        s.execute(delete(ModelVersion).where(ModelVersion.kind == "arrival_correction"))
+        s.execute(delete(ModelVersion).where(ModelVersion.kind == model_kind(source)))
         s.commit()
         print(f"re-inferred {n} arrivals; training:", train_and_maybe_promote(s, source))
 

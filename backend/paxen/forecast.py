@@ -179,11 +179,11 @@ def train_and_maybe_promote(s: Session, source: str, min_test: int = 200, holdou
     promote = len(test) >= min_test and corr < prov * 0.97
     # The served model is re-fit on all data once it has proven itself out-of-sample.
     final = CorrectionModel.fit(samples) if promote else candidate
-    mv = ModelVersion(kind="arrival_correction", params=final.to_params(),
+    mv = ModelVersion(kind=model_kind(source), params=final.to_params(),
                       metrics={**metrics, "train_n": len(train), "test_n": len(test)}, active=promote,
                       note="promoted" if promote else "shadow: did not beat provider baseline")
     if promote:
-        s.query(ModelVersion).filter(ModelVersion.kind == "arrival_correction", ModelVersion.active.is_(True)).update(
+        s.query(ModelVersion).filter(ModelVersion.kind == model_kind(source), ModelVersion.active.is_(True)).update(
             {ModelVersion.active: False})
     s.add(mv)
     s.commit()
@@ -194,14 +194,19 @@ def train_and_maybe_promote(s: Session, source: str, min_test: int = 200, holdou
 _cache: dict[str, tuple[int | None, CorrectionModel]] = {}
 
 
-def active_model(s: Session) -> CorrectionModel:
-    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == "arrival_correction", ModelVersion.active.is_(True))
+def model_kind(source: str) -> str:
+    """Models are per data source: a model trained on simulated data must never correct live TfL data."""
+    return f"arrival_correction:{source}"
+
+
+def active_model(s: Session, source: str = "sim") -> CorrectionModel:
+    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source), ModelVersion.active.is_(True))
                    .order_by(ModelVersion.id.desc())).first()
     if not mv:
         return CorrectionModel()
-    cached = _cache.get("arrival")
+    cached = _cache.get(source)
     if cached and cached[0] == mv.id:
         return cached[1]
     m = CorrectionModel.from_params(mv.params, mv.id)
-    _cache["arrival"] = (mv.id, m)
+    _cache[source] = (mv.id, m)
     return m
