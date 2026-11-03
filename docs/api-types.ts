@@ -78,7 +78,7 @@ export interface RouteOption {
   confidence: Confidence
   on_time_chance: number // 0–1: chance of arriving within 5 min of normal
   reliability: { pct: number; n: number; label: string } | null // from the user's own past trips
-  crowding: { level: 'typical' | 'busy' | 'busier' | 'very_busy' | 'n/a'; label: string; basis: string | null }
+  crowding: { level: 'quiet' | 'typical' | 'busy' | 'busier' | 'very_busy' | 'n/a'; label: string; basis: string | null }
   disruptions: Disruption[]
   live_data: boolean
   legs: Leg[]

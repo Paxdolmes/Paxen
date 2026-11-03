@@ -219,15 +219,54 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     )
 
 
+CROWD_LEVELS = ["quiet", "typical", "busy", "busier", "very_busy"]
+STATION_BASIS = ("TfL station crowding data for {station} ({when}). This is how busy the station is, "
+                 "not a measure of train occupancy.")
+
+
+def _bump(level: str, by: int) -> str:
+    return CROWD_LEVELS[max(0, min(len(CROWD_LEVELS) - 1, CROWD_LEVELS.index(level) + by))]
+
+
 def crowding_estimate(j: Journey, ctx: NetworkContext, depart_at: datetime) -> dict:
-    """Evidence-led only: time-of-day demand + disruption. Never claims measured occupancy."""
-    rail = [l for l in j.transit_legs if l.mode != "bus"]
+    """Evidence-led only. Prefer TfL's measured station busyness at the boarding station; fall back to
+    time of day + disruption. Never claims measured train occupancy."""
     if not j.transit_legs:
         return {"level": "n/a", "label": "No public transport", "basis": None}
     band = hour_band(depart_at)
-    cats = [ctx.leg_category(l) for l in j.transit_legs]
     peak = band in ("am_peak", "pm_peak")
-    if peak and any(c in (SEVERE, PART_SUSPENDED) for c in cats):
+    cats = [ctx.leg_category(l) for l in j.transit_legs]
+    disrupted_peak = peak and any(c in (SEVERE, PART_SUSPENDED) for c in cats)
+
+    first = j.transit_legs[0]
+    walk_before = sum(l.duration_min for l in j.legs[: j.legs.index(first)])
+    board_at = depart_at + timedelta(minutes=walk_before)
+    station = None
+    lookup = getattr(ctx.provider, "station_crowding", None)
+    if lookup:
+        try:
+            station = lookup(first.from_stop_id, board_at, live=(board_at - ctx.now) <= timedelta(minutes=20))
+        except Exception:
+            station = None
+    if station:
+        r = station["ratio"]
+        level = "busy" if r >= 0.6 else "typical" if r >= 0.3 else "quiet"
+        label = {"busy": f"Busy at {first.from_name}" if r < 0.85 else f"Peak time at {first.from_name}",
+                 "typical": f"Typical for {first.from_name}", "quiet": f"Quiet at {first.from_name}"}[level]
+        when = f"typical for a {station['day']} at {station['band']}"
+        lv = station.get("live_vs_typical")
+        if lv is not None:
+            when = f"live reading, {int(round(lv * 100))}% of usual for now"
+            if lv >= 1.3:
+                level, label = _bump(level, 1), "Busier than usual right now"
+            elif lv <= 0.7:
+                level, label = _bump(level, -1), "Quieter than usual right now"
+        if disrupted_peak:
+            level, label = "very_busy", "Likely very busy (disruption)"
+        return {"level": level, "label": label, "basis": STATION_BASIS.format(station=first.from_name, when=when)}
+
+    rail = [l for l in j.transit_legs if l.mode != "bus"]
+    if disrupted_peak:
         level, label = "very_busy", "Likely very busy"
     elif peak and rail and any(st.category in (SEVERE, PART_SUSPENDED, SUSPENDED)
                                and not any(sec.stops for sec in st.sections)  # local problems don't spill over

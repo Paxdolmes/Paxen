@@ -94,3 +94,31 @@ def test_no_alert_on_normal_day_or_in_quiet_hours(session):
     ev(session, c, "normal")
     assert maybe_alert(session, ev(session, c, "normal"), MORNING) is None
     assert maybe_alert(session, ev(session, c, "victoria-severe"), MORNING) is None  # quiet hours
+
+
+def test_crowding_uses_station_data_when_available(session):
+    from paxen.engine import NetworkContext, crowding_estimate
+    from paxen.forecast import CorrectionModel
+
+    class WithCrowding(SimProvider):
+        def __init__(self, reading):
+            super().__init__("normal")
+            self.reading = reading
+
+        def station_crowding(self, stop_id, when, live=False):
+            return dict(self.reading)
+
+    def label(reading, scenario="normal"):
+        p = WithCrowding(reading)
+        p.scenario = scenario
+        clear_status_cache()
+        j = next(j for j in p.journeys(HOME, WORK, MORNING) if j.summary == "Victoria")
+        ctx = NetworkContext(p, MORNING, {s.line_id: s for s in p.line_statuses(MORNING).items}, CorrectionModel())
+        return crowding_estimate(j, ctx, MORNING)
+
+    peak = {"pct": 0.49, "peak": 0.49, "ratio": 1.0, "band": "08:30", "day": "Tue"}
+    c = label(peak)
+    assert c["level"] == "busy" and "Walthamstow Central" in c["label"] and "not a measure of train" in c["basis"]
+    assert label({**peak, "ratio": 0.2})["level"] == "quiet"
+    assert label({**peak, "ratio": 0.4, "live_vs_typical": 1.5})["label"] == "Busier than usual right now"
+    assert label(peak, "victoria-severe")["level"] == "very_busy"  # disruption overrides

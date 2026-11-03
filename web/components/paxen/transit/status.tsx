@@ -47,6 +47,7 @@ export function LineStatusText({ category, description }: { category: LineCatego
 }
 
 const crowdTone: Record<RouteOption['crowding']['level'], ChipTone> = {
+  quiet: 'success',
   typical: 'neutral',
   busy: 'watch',
   busier: 'watch',

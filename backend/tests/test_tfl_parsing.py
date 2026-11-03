@@ -48,7 +48,7 @@ def test_parse_arrivals_sorted_and_tolerates_7_digit_fractions():
     a = parse_arrivals(ARRIVALS, "940GZZLUWWL")
     assert [x.vehicle_id for x in a] == ["242", "241"]
     assert a[1].feed_timestamp.microsecond == 123456
-    assert a[0].direction == "Brixton Underground Station"
+    assert a[0].direction == "Brixton"  # TfL suffixes stripped for display
 
 
 def test_parse_statuses_uses_worst_status():
@@ -155,3 +155,16 @@ def test_invalid_key_falls_back_to_anonymous():
     from datetime import datetime, timezone
     res = p.line_statuses(datetime.now(timezone.utc))
     assert len(res.items) == 4 and seen == [True, False] and p.app_key is None
+
+
+def test_crowding_profile_relative_to_station_peak():
+    from datetime import datetime
+    from paxen.providers.tfl import crowding_at, parse_crowding_profile
+    from paxen.timeutil import LONDON
+    prof = parse_crowding_profile({"isFound": True, "timeBands": [
+        {"timeBand": "08:15-08:30", "percentageOfBaseLine": 0.46},
+        {"timeBand": "08:30-08:45", "percentageOfBaseLine": 0.49},
+        {"timeBand": "13:30-13:45", "percentageOfBaseLine": 0.10}]})
+    at = crowding_at(prof, datetime(2026, 11, 3, 8, 20, tzinfo=LONDON))
+    assert at["band"] == "08:15" and at["ratio"] == 0.94 and at["day"] == "Tue"
+    assert parse_crowding_profile({"isFound": False, "timeBands": []}) is None

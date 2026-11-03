@@ -74,10 +74,10 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
         arr = Arrival(
             vehicle_id=str(a.get("vehicleId") or a.get("id")),
             stop_id=naptan,
-            stop_name=a.get("stationName", ""),
+            stop_name=_clean_name(a.get("stationName", "")),
             line_id=a.get("lineId", ""), line_name=a.get("lineName", ""), mode=a.get("modeName", ""),
-            direction=a.get("destinationName") or a.get("direction") or "",
-            destination=a.get("destinationName", ""),
+            direction=_clean_name(a.get("destinationName") or a.get("direction") or ""),
+            destination=_clean_name(a.get("destinationName", "")),
             expected_arrival=exp, time_to_station_s=int(a.get("timeToStation", 0)),
             feed_timestamp=ts or datetime.now(timezone.utc), platform=a.get("platformName"),
             terminates_here=terminates,
@@ -127,7 +127,7 @@ def parse_journeys(payload: dict) -> list[Journey]:
             first = dp.get("naptanId")
             legs.append(Leg(
                 mode=mode, duration_min=float(l.get("duration", 0)),
-                from_name=dp.get("commonName", ""), to_name=ap.get("commonName", ""),
+                from_name=_clean_name(dp.get("commonName", "")), to_name=_clean_name(ap.get("commonName", "")),
                 departure=dep, arrival=arr,
                 line_id=line.get("id") if mode != "walking" else None,
                 line_name=line.get("name") or route.get("name") if mode != "walking" else None,
@@ -178,6 +178,26 @@ def parse_place_search(payload: dict) -> list[PlaceResult]:
     return out[:10]
 
 
+def parse_crowding_profile(payload: dict) -> dict[str, float] | None:
+    """{'08:15': 0.46, ...} from TfL's 15-minute bands; None when the station isn't covered."""
+    if not payload or not payload.get("isFound") or not payload.get("timeBands"):
+        return None
+    return {b["timeBand"][:5]: float(b["percentageOfBaseLine"]) for b in payload["timeBands"]}
+
+
+def crowding_at(profile: dict[str, float], when: datetime) -> dict:
+    band = f"{when.hour:02d}:{(when.minute // 15) * 15:02d}"
+    pct = profile.get(band, 0.0)
+    peak = max(profile.values()) or 1.0
+    return {"pct": pct, "peak": peak, "ratio": round(pct / peak, 2), "band": band, "day": when.strftime("%a")}
+
+
+def _live_pct(payload: dict) -> float | None:
+    if not payload or not payload.get("dataAvailable"):
+        return None
+    return float(payload["percentageOfBaseline"])
+
+
 class TflProvider:
     name = "tfl"
 
@@ -186,6 +206,7 @@ class TflProvider:
         self.app_key = app_key
         self.client = httpx.Client(timeout=timeout, headers={"User-Agent": "paxen-commute/0.1"})
         self._journey_cache: dict[tuple, tuple[float, list[Journey]]] = {}
+        self._crowd_cache: dict[tuple, tuple[float, object]] = {}
 
     def _get(self, path: str, params: dict | None = None) -> tuple[object, str, int, int]:
         params = dict(params or {})
@@ -241,3 +262,37 @@ class TflProvider:
     def search_places(self, query: str) -> list[PlaceResult]:
         data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 15})
         return parse_place_search(data)
+
+    # ---- crowding (Underground stations only) ------------------------------------------
+    def _cached(self, key: tuple, ttl: float, fetch):
+        hit = self._crowd_cache.get(key)
+        if hit and time.monotonic() - hit[0] < ttl:
+            return hit[1]
+        try:
+            val = fetch()
+        except (httpx.HTTPError, ValueError, KeyError):
+            val = None
+        self._crowd_cache[key] = (time.monotonic(), val)
+        return val
+
+    def station_crowding(self, stop_id: str | None, when: datetime, live: bool = False) -> dict | None:
+        """Station busyness from TfL's crowding data, relative to the station's own daily peak.
+
+        Returns None where TfL has no data (only Underground stations are covered).
+        """
+        if not stop_id or not stop_id.startswith("940G"):
+            return None
+        loc = when.astimezone(LONDON)
+        day = loc.strftime("%a")
+        profile = self._cached(("profile", stop_id, day), 12 * 3600,
+                               lambda: parse_crowding_profile(self._get(f"/crowding/{stop_id}/{day}")[0]))
+        if not profile:
+            return None
+        out = crowding_at(profile, loc)
+        if live:
+            now_loc = datetime.now(LONDON)
+            live_pct = self._cached(("live", stop_id), 180, lambda: _live_pct(self._get(f"/crowding/{stop_id}/Live")[0]))
+            typical_now = crowding_at(profile, now_loc)["pct"]
+            if live_pct is not None and typical_now > 0.02:
+                out["live_vs_typical"] = round(live_pct / typical_now, 2)
+        return out
