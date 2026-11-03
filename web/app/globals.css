@@ -1,0 +1,168 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+/* Dark mode follows the OS. Token values live in lib/paxen-tokens.ts and are injected as --px-* vars. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --color-px-canvas: var(--px-canvas);
+  --color-px-surface: var(--px-surface);
+  --color-px-surface-raised: var(--px-surface-raised);
+  --color-px-surface-sunken: var(--px-surface-sunken);
+  --color-px-border: var(--px-border);
+  --color-px-border-strong: var(--px-border-strong);
+  --color-px-text: var(--px-text);
+  --color-px-text-secondary: var(--px-text-secondary);
+  --color-px-text-tertiary: var(--px-text-tertiary);
+  --color-px-text-inverse: var(--px-text-inverse);
+  --color-px-brand: var(--px-brand);
+  --color-px-brand-pressed: var(--px-brand-pressed);
+  --color-px-on-brand: var(--px-on-brand);
+  --color-px-brand-soft: var(--px-brand-soft);
+  --color-px-on-brand-soft: var(--px-on-brand-soft);
+  --color-px-success: var(--px-success);
+  --color-px-success-soft: var(--px-success-soft);
+  --color-px-on-success-soft: var(--px-on-success-soft);
+  --color-px-watch: var(--px-watch);
+  --color-px-watch-soft: var(--px-watch-soft);
+  --color-px-on-watch-soft: var(--px-on-watch-soft);
+  --color-px-attention: var(--px-attention);
+  --color-px-attention-strong: var(--px-attention-strong);
+  --color-px-on-attention: var(--px-on-attention);
+  --color-px-attention-soft: var(--px-attention-soft);
+  --color-px-on-attention-soft: var(--px-on-attention-soft);
+  --color-px-focus: var(--px-focus);
+  --color-px-overlay: var(--px-overlay);
+
+  --radius-px-xs: var(--px-radius-xs);
+  --radius-px-sm: var(--px-radius-sm);
+  --radius-px-md: var(--px-radius-md);
+  --radius-px-lg: var(--px-radius-lg);
+  --radius-px-xl: var(--px-radius-xl);
+
+  --shadow-px-card: var(--px-shadow-card);
+  --shadow-px-raised: var(--px-shadow-raised);
+  --shadow-px-bar: var(--px-shadow-bar);
+
+  /* shadcn compatibility, mapped onto Paxen tokens */
+  --color-background: var(--px-canvas);
+  --color-foreground: var(--px-text);
+  --color-card: var(--px-surface);
+  --color-card-foreground: var(--px-text);
+  --color-popover: var(--px-surface-raised);
+  --color-popover-foreground: var(--px-text);
+  --color-primary: var(--px-brand);
+  --color-primary-foreground: var(--px-on-brand);
+  --color-secondary: var(--px-surface-sunken);
+  --color-secondary-foreground: var(--px-text);
+  --color-muted: var(--px-surface-sunken);
+  --color-muted-foreground: var(--px-text-secondary);
+  --color-accent: var(--px-surface-sunken);
+  --color-accent-foreground: var(--px-text);
+  --color-destructive: var(--px-attention);
+  --color-border: var(--px-border);
+  --color-input: var(--px-border-strong);
+  --color-ring: var(--px-focus);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+}
+
+@layer base {
+  * {
+    @apply border-px-border outline-px-focus/60;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-px-canvas text-px-text font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'tnum' 0;
+  }
+  :focus-visible {
+    outline: 2px solid var(--px-focus);
+    outline-offset: 2px;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@keyframes px-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes px-shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes px-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes px-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.px-live-dot {
+  animation: px-pulse 1.8s ease-in-out infinite;
+}
+
+.px-skeleton {
+  animation: px-shimmer 1.4s ease-in-out infinite;
+}
+
+.px-rise {
+  animation: px-rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .px-live-dot,
+  .px-skeleton,
+  .px-rise {
+    animation: none;
+  }
+}

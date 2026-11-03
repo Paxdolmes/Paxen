@@ -36,6 +36,11 @@ NEXT_PUBLIC_PAXEN_API_URL=http://localhost:8000 pnpm dev
 ```
 
 Without `NEXT_PUBLIC_PAXEN_API_URL` the web app runs in demo mode on bundled sample data.
+The UI was generated in v0 ([chat](https://v0.app/chat/k0gLb8FzfOs)); design tokens live in `web/lib/paxen-tokens.ts`.
+
+| Normal day | Disrupted | Compare routes |
+|---|---|---|
+| ![](docs/screenshots/today-normal.png) | ![](docs/screenshots/today-disrupted.png) | ![](docs/screenshots/routes.png) |
 
 Tests:
 

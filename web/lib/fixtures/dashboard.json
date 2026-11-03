@@ -1,0 +1,976 @@
+{
+  "generated_at": "2026-11-03T11:22:28.657884+00:00",
+  "user": {
+    "id": "af591b2f2043471ea1cb51f674d05f24",
+    "name": "Sam",
+    "quiet_start": "22:00",
+    "quiet_end": "06:30",
+    "monitoring_paused": false,
+    "alert_threshold_min": 8,
+    "min_gain_min": 5,
+    "push_enabled": false
+  },
+  "provider": "sim",
+  "simulated": true,
+  "feed": {
+    "last_success_at": "2026-11-03T11:22:25.210413+00:00",
+    "last_error_at": null,
+    "age_s": 3,
+    "fresh": true,
+    "predictions_recorded": 42483,
+    "observed_arrivals": 1056
+  },
+  "active_commute_id": "4f761a39d58b462ba0f32ebc12ad1745",
+  "commutes": [
+    {
+      "commute": {
+        "id": "43e56c0cb7b946a7b532b48e8af5cf61",
+        "name": "To work",
+        "origin": {
+          "id": "8cf33e66cbce4cc9a2dceded62e965fc",
+          "label": "home",
+          "name": "Orford Road, Walthamstow",
+          "lat": 51.5826,
+          "lon": -0.0128,
+          "source": "saved",
+          "confirmed": true
+        },
+        "dest": {
+          "id": "d4a66c28615349438587f6400df202a5",
+          "label": "work",
+          "name": "Regent Street office",
+          "lat": 51.5141,
+          "lon": -0.1405,
+          "source": "manual",
+          "confirmed": true
+        },
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "window_start": "08:00",
+        "window_end": "08:45",
+        "preference": "balanced",
+        "alerts_enabled": true,
+        "usual_summary": "Victoria",
+        "usual_signature": "tube:victoria@walthamstow-central"
+      },
+      "active": false,
+      "depart_at": "2026-11-03T11:22:28.657884+00:00",
+      "status": "slower",
+      "headline": "Your usual commute is 11 minutes slower today",
+      "detail": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses. No faster alternative right now — leave about 11 minutes earlier.",
+      "delta_min": 11.1,
+      "gain_min": null,
+      "preference": "balanced",
+      "baseline": {
+        "p50": 33,
+        "p80": 34.5,
+        "n": 15,
+        "basis": "personal",
+        "label": "Your last 15 trips"
+      },
+      "usual": {
+        "id": "tube:victoria@walthamstow-central",
+        "summary": "Victoria",
+        "is_usual": true,
+        "is_recommended": true,
+        "feasible": true,
+        "depart_at": "2026-11-03T11:22:28.657884+00:00",
+        "arrive_at": "2026-11-03T12:06:34.657884+00:00",
+        "arrive_range": [
+          "2026-11-03T11:59:58.657884+00:00",
+          "2026-11-03T12:18:52.657884+00:00"
+        ],
+        "duration": {
+          "p10": 37.5,
+          "p50": 44.1,
+          "p90": 56.4
+        },
+        "nominal_min": 31.9,
+        "vs_usual_min": null,
+        "walking_min": 10.9,
+        "changes": 0,
+        "confidence": "low",
+        "on_time_chance": 0.23,
+        "reliability": {
+          "pct": 1,
+          "n": 15,
+          "label": "On time on 15 of your 15 trips"
+        },
+        "crowding": {
+          "level": "typical",
+          "label": "Typical for this time",
+          "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+        },
+        "disruptions": [
+          {
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "category": "severe",
+            "description": "Severe delays",
+            "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses."
+          }
+        ],
+        "live_data": true,
+        "legs": [
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Orford Road, Walthamstow",
+            "to": "Walthamstow Central",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 8.3,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "tube",
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "from": "Walthamstow Central",
+            "to": "Oxford Circus",
+            "direction": "Brixton",
+            "wait_min": 1.5,
+            "ride_min": 31.7,
+            "live": true,
+            "status": "severe",
+            "next_departures_min": [
+              1.5,
+              9,
+              15.2
+            ]
+          },
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Oxford Circus",
+            "to": "Regent Street office",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 2.6,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          }
+        ]
+      },
+      "recommended": {
+        "id": "tube:victoria@walthamstow-central",
+        "summary": "Victoria",
+        "is_usual": true,
+        "is_recommended": true,
+        "feasible": true,
+        "depart_at": "2026-11-03T11:22:28.657884+00:00",
+        "arrive_at": "2026-11-03T12:06:34.657884+00:00",
+        "arrive_range": [
+          "2026-11-03T11:59:58.657884+00:00",
+          "2026-11-03T12:18:52.657884+00:00"
+        ],
+        "duration": {
+          "p10": 37.5,
+          "p50": 44.1,
+          "p90": 56.4
+        },
+        "nominal_min": 31.9,
+        "vs_usual_min": null,
+        "walking_min": 10.9,
+        "changes": 0,
+        "confidence": "low",
+        "on_time_chance": 0.23,
+        "reliability": {
+          "pct": 1,
+          "n": 15,
+          "label": "On time on 15 of your 15 trips"
+        },
+        "crowding": {
+          "level": "typical",
+          "label": "Typical for this time",
+          "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+        },
+        "disruptions": [
+          {
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "category": "severe",
+            "description": "Severe delays",
+            "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses."
+          }
+        ],
+        "live_data": true,
+        "legs": [
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Orford Road, Walthamstow",
+            "to": "Walthamstow Central",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 8.3,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "tube",
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "from": "Walthamstow Central",
+            "to": "Oxford Circus",
+            "direction": "Brixton",
+            "wait_min": 1.5,
+            "ride_min": 31.7,
+            "live": true,
+            "status": "severe",
+            "next_departures_min": [
+              1.5,
+              9,
+              15.2
+            ]
+          },
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Oxford Circus",
+            "to": "Regent Street office",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 2.6,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          }
+        ]
+      },
+      "options": [
+        {
+          "id": "tube:victoria@walthamstow-central",
+          "summary": "Victoria",
+          "is_usual": true,
+          "is_recommended": true,
+          "feasible": true,
+          "depart_at": "2026-11-03T11:22:28.657884+00:00",
+          "arrive_at": "2026-11-03T12:06:34.657884+00:00",
+          "arrive_range": [
+            "2026-11-03T11:59:58.657884+00:00",
+            "2026-11-03T12:18:52.657884+00:00"
+          ],
+          "duration": {
+            "p10": 37.5,
+            "p50": 44.1,
+            "p90": 56.4
+          },
+          "nominal_min": 31.9,
+          "vs_usual_min": null,
+          "walking_min": 10.9,
+          "changes": 0,
+          "confidence": "low",
+          "on_time_chance": 0.23,
+          "reliability": {
+            "pct": 1,
+            "n": 15,
+            "label": "On time on 15 of your 15 trips"
+          },
+          "crowding": {
+            "level": "typical",
+            "label": "Typical for this time",
+            "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+          },
+          "disruptions": [
+            {
+              "line_id": "victoria",
+              "line_name": "Victoria",
+              "category": "severe",
+              "description": "Severe delays",
+              "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses."
+            }
+          ],
+          "live_data": true,
+          "legs": [
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Orford Road, Walthamstow",
+              "to": "Walthamstow Central",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 8.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "tube",
+              "line_id": "victoria",
+              "line_name": "Victoria",
+              "from": "Walthamstow Central",
+              "to": "Oxford Circus",
+              "direction": "Brixton",
+              "wait_min": 1.5,
+              "ride_min": 31.7,
+              "live": true,
+              "status": "severe",
+              "next_departures_min": [
+                1.5,
+                9,
+                15.2
+              ]
+            },
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Oxford Circus",
+              "to": "Regent Street office",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 2.6,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            }
+          ]
+        },
+        {
+          "id": "overground:weaver@walthamstow-central>tube:central@liverpool-street",
+          "summary": "Weaver line → Central",
+          "is_usual": false,
+          "is_recommended": false,
+          "feasible": true,
+          "depart_at": "2026-11-03T11:22:28.657884+00:00",
+          "arrive_at": "2026-11-03T12:06:52.657+00:00",
+          "arrive_range": [
+            "2026-11-03T12:03:28.657+00:00",
+            "2026-11-03T12:10:40.657+00:00"
+          ],
+          "duration": {
+            "p10": 41,
+            "p50": 44.4,
+            "p90": 48.2
+          },
+          "nominal_min": 40.2,
+          "vs_usual_min": 0.3,
+          "walking_min": 10.9,
+          "changes": 1,
+          "confidence": "high",
+          "on_time_chance": 0.11,
+          "reliability": null,
+          "crowding": {
+            "level": "busier",
+            "label": "Likely busier than usual",
+            "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+          },
+          "disruptions": [],
+          "live_data": true,
+          "legs": [
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Orford Road, Walthamstow",
+              "to": "Walthamstow Central",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 8.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "overground",
+              "line_id": "weaver",
+              "line_name": "Weaver line",
+              "from": "Walthamstow Central",
+              "to": "Liverpool Street",
+              "direction": "Liverpool Street",
+              "wait_min": 6.2,
+              "ride_min": 12.8,
+              "live": true,
+              "status": "good",
+              "next_departures_min": [
+                6.2,
+                21.2,
+                36.2
+              ]
+            },
+            {
+              "mode": "tube",
+              "line_id": "central",
+              "line_name": "Central",
+              "from": "Liverpool Street",
+              "to": "Oxford Circus",
+              "direction": "West Ruislip",
+              "wait_min": 4.5,
+              "ride_min": 10,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Oxford Circus",
+              "to": "Regent Street office",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 2.6,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "commute": {
+        "id": "4f761a39d58b462ba0f32ebc12ad1745",
+        "name": "Home",
+        "origin": {
+          "id": "d4a66c28615349438587f6400df202a5",
+          "label": "work",
+          "name": "Regent Street office",
+          "lat": 51.5141,
+          "lon": -0.1405,
+          "source": "manual",
+          "confirmed": true
+        },
+        "dest": {
+          "id": "8cf33e66cbce4cc9a2dceded62e965fc",
+          "label": "home",
+          "name": "Orford Road, Walthamstow",
+          "lat": 51.5826,
+          "lon": -0.0128,
+          "source": "saved",
+          "confirmed": true
+        },
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "window_start": "17:30",
+        "window_end": "18:15",
+        "preference": "balanced",
+        "alerts_enabled": true,
+        "usual_summary": "Victoria",
+        "usual_signature": "tube:victoria@oxford-circus"
+      },
+      "active": false,
+      "depart_at": "2026-11-03T17:30:00+00:00",
+      "status": "slower",
+      "headline": "Your usual commute is 14 minutes slower today",
+      "detail": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses. Taking the Central → Weaver line is forecast to get you there 6 minutes sooner.",
+      "delta_min": 14,
+      "gain_min": 6.1,
+      "preference": "balanced",
+      "baseline": {
+        "p50": 32.3,
+        "p80": 33.3,
+        "n": 15,
+        "basis": "personal",
+        "label": "Your last 15 trips"
+      },
+      "usual": {
+        "id": "tube:victoria@oxford-circus",
+        "summary": "Victoria",
+        "is_usual": true,
+        "is_recommended": false,
+        "feasible": true,
+        "depart_at": "2026-11-03T17:30:00+00:00",
+        "arrive_at": "2026-11-03T18:16:18+00:00",
+        "arrive_range": [
+          "2026-11-03T18:09:24+00:00",
+          "2026-11-03T18:28:48+00:00"
+        ],
+        "duration": {
+          "p10": 39.4,
+          "p50": 46.3,
+          "p90": 58.8
+        },
+        "nominal_min": 31.9,
+        "vs_usual_min": null,
+        "walking_min": 10.9,
+        "changes": 0,
+        "confidence": "low",
+        "on_time_chance": 0.17,
+        "reliability": {
+          "pct": 1,
+          "n": 15,
+          "label": "On time on 15 of your 15 trips"
+        },
+        "crowding": {
+          "level": "very_busy",
+          "label": "Likely very busy",
+          "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+        },
+        "disruptions": [
+          {
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "category": "severe",
+            "description": "Severe delays",
+            "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses."
+          }
+        ],
+        "live_data": false,
+        "legs": [
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Regent Street office",
+            "to": "Oxford Circus",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 2.6,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "tube",
+            "line_id": "victoria",
+            "line_name": "Victoria",
+            "from": "Oxford Circus",
+            "to": "Walthamstow Central",
+            "direction": "Walthamstow Central",
+            "wait_min": 3.8,
+            "ride_min": 31.7,
+            "live": false,
+            "status": "severe",
+            "next_departures_min": []
+          },
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Walthamstow Central",
+            "to": "Orford Road, Walthamstow",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 8.3,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          }
+        ]
+      },
+      "recommended": {
+        "id": "tube:central@oxford-circus>overground:weaver@liverpool-street",
+        "summary": "Central → Weaver line",
+        "is_usual": false,
+        "is_recommended": true,
+        "feasible": true,
+        "depart_at": "2026-11-03T17:30:00+00:00",
+        "arrive_at": "2026-11-03T18:10:12+00:00",
+        "arrive_range": [
+          "2026-11-03T18:06:06+00:00",
+          "2026-11-03T18:14:18+00:00"
+        ],
+        "duration": {
+          "p10": 36.1,
+          "p50": 40.2,
+          "p90": 44.3
+        },
+        "nominal_min": 40.2,
+        "vs_usual_min": -6.1,
+        "walking_min": 10.9,
+        "changes": 1,
+        "confidence": "medium",
+        "on_time_chance": 0.94,
+        "reliability": null,
+        "crowding": {
+          "level": "busier",
+          "label": "Likely busier than usual",
+          "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+        },
+        "disruptions": [],
+        "live_data": false,
+        "legs": [
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Regent Street office",
+            "to": "Oxford Circus",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 2.6,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "tube",
+            "line_id": "central",
+            "line_name": "Central",
+            "from": "Oxford Circus",
+            "to": "Liverpool Street",
+            "direction": "Stratford",
+            "wait_min": 1.5,
+            "ride_min": 10,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "overground",
+            "line_id": "weaver",
+            "line_name": "Weaver line",
+            "from": "Liverpool Street",
+            "to": "Walthamstow Central",
+            "direction": "Walthamstow Central",
+            "wait_min": 5,
+            "ride_min": 12.8,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          },
+          {
+            "mode": "walking",
+            "line_id": null,
+            "line_name": null,
+            "from": "Walthamstow Central",
+            "to": "Orford Road, Walthamstow",
+            "direction": null,
+            "wait_min": 0,
+            "ride_min": 8.3,
+            "live": false,
+            "status": "good",
+            "next_departures_min": []
+          }
+        ]
+      },
+      "options": [
+        {
+          "id": "tube:central@oxford-circus>overground:weaver@liverpool-street",
+          "summary": "Central → Weaver line",
+          "is_usual": false,
+          "is_recommended": true,
+          "feasible": true,
+          "depart_at": "2026-11-03T17:30:00+00:00",
+          "arrive_at": "2026-11-03T18:10:12+00:00",
+          "arrive_range": [
+            "2026-11-03T18:06:06+00:00",
+            "2026-11-03T18:14:18+00:00"
+          ],
+          "duration": {
+            "p10": 36.1,
+            "p50": 40.2,
+            "p90": 44.3
+          },
+          "nominal_min": 40.2,
+          "vs_usual_min": -6.1,
+          "walking_min": 10.9,
+          "changes": 1,
+          "confidence": "medium",
+          "on_time_chance": 0.94,
+          "reliability": null,
+          "crowding": {
+            "level": "busier",
+            "label": "Likely busier than usual",
+            "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+          },
+          "disruptions": [],
+          "live_data": false,
+          "legs": [
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Regent Street office",
+              "to": "Oxford Circus",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 2.6,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "tube",
+              "line_id": "central",
+              "line_name": "Central",
+              "from": "Oxford Circus",
+              "to": "Liverpool Street",
+              "direction": "Stratford",
+              "wait_min": 1.5,
+              "ride_min": 10,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "overground",
+              "line_id": "weaver",
+              "line_name": "Weaver line",
+              "from": "Liverpool Street",
+              "to": "Walthamstow Central",
+              "direction": "Walthamstow Central",
+              "wait_min": 5,
+              "ride_min": 12.8,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Walthamstow Central",
+              "to": "Orford Road, Walthamstow",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 8.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            }
+          ]
+        },
+        {
+          "id": "tube:victoria@oxford-circus",
+          "summary": "Victoria",
+          "is_usual": true,
+          "is_recommended": false,
+          "feasible": true,
+          "depart_at": "2026-11-03T17:30:00+00:00",
+          "arrive_at": "2026-11-03T18:16:18+00:00",
+          "arrive_range": [
+            "2026-11-03T18:09:24+00:00",
+            "2026-11-03T18:28:48+00:00"
+          ],
+          "duration": {
+            "p10": 39.4,
+            "p50": 46.3,
+            "p90": 58.8
+          },
+          "nominal_min": 31.9,
+          "vs_usual_min": null,
+          "walking_min": 10.9,
+          "changes": 0,
+          "confidence": "low",
+          "on_time_chance": 0.17,
+          "reliability": {
+            "pct": 1,
+            "n": 15,
+            "label": "On time on 15 of your 15 trips"
+          },
+          "crowding": {
+            "level": "very_busy",
+            "label": "Likely very busy",
+            "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+          },
+          "disruptions": [
+            {
+              "line_id": "victoria",
+              "line_name": "Victoria",
+              "category": "severe",
+              "description": "Severe delays",
+              "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses."
+            }
+          ],
+          "live_data": false,
+          "legs": [
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Regent Street office",
+              "to": "Oxford Circus",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 2.6,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "tube",
+              "line_id": "victoria",
+              "line_name": "Victoria",
+              "from": "Oxford Circus",
+              "to": "Walthamstow Central",
+              "direction": "Walthamstow Central",
+              "wait_min": 3.8,
+              "ride_min": 31.7,
+              "live": false,
+              "status": "severe",
+              "next_departures_min": []
+            },
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Walthamstow Central",
+              "to": "Orford Road, Walthamstow",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 8.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            }
+          ]
+        },
+        {
+          "id": "elizabeth-line:elizabeth@bond-street>overground:weaver@liverpool-street",
+          "summary": "Elizabeth line → Weaver line",
+          "is_usual": false,
+          "is_recommended": false,
+          "feasible": true,
+          "depart_at": "2026-11-03T17:30:00+00:00",
+          "arrive_at": "2026-11-03T18:16:30.000+00:00",
+          "arrive_range": [
+            "2026-11-03T18:12:54.000+00:00",
+            "2026-11-03T18:21:00.000+00:00"
+          ],
+          "duration": {
+            "p10": 42.9,
+            "p50": 46.5,
+            "p90": 51
+          },
+          "nominal_min": 44.1,
+          "vs_usual_min": 0.2,
+          "walking_min": 20.6,
+          "changes": 1,
+          "confidence": "medium",
+          "on_time_chance": 0.92,
+          "reliability": null,
+          "crowding": {
+            "level": "busier",
+            "label": "Likely busier than usual",
+            "basis": "Estimate from time of day and live disruption — not measured train occupancy."
+          },
+          "disruptions": [],
+          "live_data": false,
+          "legs": [
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Regent Street office",
+              "to": "Bond Street",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 12.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "elizabeth-line",
+              "line_id": "elizabeth",
+              "line_name": "Elizabeth line",
+              "from": "Bond Street",
+              "to": "Liverpool Street",
+              "direction": "Abbey Wood",
+              "wait_min": 2.5,
+              "ride_min": 7,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "overground",
+              "line_id": "weaver",
+              "line_name": "Weaver line",
+              "from": "Liverpool Street",
+              "to": "Walthamstow Central",
+              "direction": "Walthamstow Central",
+              "wait_min": 3.6,
+              "ride_min": 12.8,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            },
+            {
+              "mode": "walking",
+              "line_id": null,
+              "line_name": null,
+              "from": "Walthamstow Central",
+              "to": "Orford Road, Walthamstow",
+              "direction": null,
+              "wait_min": 0,
+              "ride_min": 8.3,
+              "live": false,
+              "status": "good",
+              "next_departures_min": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "network": [
+    {
+      "line_id": "victoria",
+      "line_name": "Victoria",
+      "mode": "tube",
+      "category": "severe",
+      "description": "Severe delays",
+      "reason": "Severe delays due to an earlier signal failure at Euston. Tickets are being accepted on local buses.",
+      "on_my_routes": true
+    },
+    {
+      "line_id": "central",
+      "line_name": "Central",
+      "mode": "tube",
+      "category": "good",
+      "description": "Good service",
+      "reason": null,
+      "on_my_routes": true
+    },
+    {
+      "line_id": "elizabeth",
+      "line_name": "Elizabeth line",
+      "mode": "elizabeth-line",
+      "category": "good",
+      "description": "Good service",
+      "reason": null,
+      "on_my_routes": true
+    },
+    {
+      "line_id": "weaver",
+      "line_name": "Weaver line",
+      "mode": "overground",
+      "category": "good",
+      "description": "Good service",
+      "reason": null,
+      "on_my_routes": true
+    },
+    {
+      "line_id": "greater-anglia",
+      "line_name": "Greater Anglia",
+      "mode": "national-rail",
+      "category": "good",
+      "description": "Good service",
+      "reason": null,
+      "on_my_routes": false
+    },
+    {
+      "line_id": "jubilee",
+      "line_name": "Jubilee",
+      "mode": "tube",
+      "category": "good",
+      "description": "Good service",
+      "reason": null,
+      "on_my_routes": false
+    }
+  ],
+  "unread_alerts": 1
+}
