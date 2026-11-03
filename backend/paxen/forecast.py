@@ -54,7 +54,9 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
         .join(ObservedArrival, (ObservedArrival.source == Prediction.source)
               & (ObservedArrival.stop_id == Prediction.stop_id)
               & (ObservedArrival.line_id == Prediction.line_id)
-              & (ObservedArrival.vehicle_id == Prediction.vehicle_id))
+              & (ObservedArrival.vehicle_id == Prediction.vehicle_id)
+              & ((ObservedArrival.direction == Prediction.direction)
+                 | (ObservedArrival.direction.is_(None) & Prediction.direction.is_(None))))
         .where(Prediction.source == source, ObservedArrival.quality >= min_quality,
                Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S)
     )
@@ -63,8 +65,8 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
     out = []
     for polled, line, stop, tts, exp, cat, arrived, quality in s.execute(q):
         err = (arrived - exp).total_seconds()
-        if abs(err) > 1800:  # vehicle id reused hours later — not the same trip
-            continue
+        if abs(err) > 1800 or (arrived - polled).total_seconds() > MAX_LEAD_S + 900:
+            continue  # vehicle id reused by a later trip — not the same journey
         out.append(Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good", err, quality))
     out.sort(key=lambda x: x.polled_at)
     return out
@@ -97,8 +99,10 @@ class CorrectionModel:
         for x in samples:
             for k in cls.keys(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted):
                 buckets[k].append(x.error_s)
+        # "mean" is the group's typical error. A median: real feeds have rare huge errors (vehicle-id reuse,
+        # unannounced short-forms) that would drag an average and make the correction worse than none.
         groups = {
-            k: {"n": len(v), "mean": statistics.fmean(v), "q10": _quantile(v, 0.1), "q90": _quantile(v, 0.9)}
+            k: {"n": len(v), "mean": statistics.median(v), "q10": _quantile(v, 0.1), "q90": _quantile(v, 0.9)}
             for k, v in buckets.items()
         }
         return cls(groups)

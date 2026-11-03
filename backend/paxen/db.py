@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine,
+    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine, inspect, text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -157,6 +157,9 @@ class ObservedArrival(Base):
     stop_id: Mapped[str] = mapped_column(String(40))
     line_id: Mapped[str] = mapped_column(String(40))
     vehicle_id: Mapped[str] = mapped_column(String(60))
+    # TfL reuses a train's id in both directions (and when a terminating train forms a departure),
+    # so direction is part of an arrival's identity.
+    direction: Mapped[str | None] = mapped_column(String(120))
     arrived_at: Mapped[datetime] = mapped_column(DateTime)
     earliest: Mapped[datetime] = mapped_column(DateTime)
     latest: Mapped[datetime] = mapped_column(DateTime)
@@ -207,5 +210,15 @@ engine = make_engine()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
+# Additive column changes for databases created by earlier versions (no migration framework yet).
+_ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)")]
+
+
 def init_db(eng=None) -> None:
-    Base.metadata.create_all(eng or engine)
+    eng = eng or engine
+    Base.metadata.create_all(eng)
+    insp = inspect(eng)
+    with eng.begin() as conn:
+        for table, column, ddl in _ADDED_COLUMNS:
+            if column not in {c["name"] for c in insp.get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))

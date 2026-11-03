@@ -86,50 +86,82 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
     return len(res.items)
 
 
-def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta = timedelta(minutes=20)) -> int:
-    """A vehicle that was about to arrive and then vanished from the countdown has (probably) arrived.
+AT_PLATFORM_S = 30  # countdown at/below this means the vehicle is arriving now
+MAX_DWELL_S = 300  # shown as "due" longer than this = terminus layover / id reuse, not an arrival
+GONE_POLLS = 2  # vehicles flicker on and off TfL boards; must be missing this many polls in a row
+DEDUPE_WINDOW = timedelta(minutes=10)
 
-    arrived_at is bounded by [last poll it was seen, first poll it was missing]; the point estimate is the
-    final predicted time clamped into that interval. Quality falls with the width of the interval.
+
+def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta = timedelta(minutes=20)) -> int:
+    """Infer that a vehicle arrived, from how its countdown behaved. Never treated as measured.
+
+    * Primary signal: the first poll where the countdown reached the platform (<= AT_PLATFORM_S). The
+      arrival is that poll's predicted time; bounds are [previous poll, that time + AT_PLATFORM_S].
+    * Fallback: the vehicle was <= 2 min away and then vanished from the board before the next poll.
+    * Rejected: vehicles that sit at "due" for more than MAX_DWELL_S (a train laying over at a
+      terminus, or a vehicle id reused by a later trip) — their arrival time is unknowable from this.
+    A vehicle is only judged once it has left the board.
     """
     since = naive_utc(now - lookback)
     rows = s.execute(
-        select(Prediction.stop_id, Prediction.line_id, Prediction.vehicle_id, Prediction.polled_at,
-               Prediction.expected_arrival, Prediction.tts_s)
+        select(Prediction.stop_id, Prediction.line_id, Prediction.vehicle_id, Prediction.direction,
+               Prediction.polled_at, Prediction.expected_arrival, Prediction.tts_s)
         .where(Prediction.source == source, Prediction.polled_at >= since)
         .order_by(Prediction.polled_at)
     ).all()
     if not rows:
         return 0
     polls_by_stop: dict[str, list[datetime]] = defaultdict(list)
-    last_seen: dict[tuple, tuple] = {}
-    for stop, line, veh, polled, exp, tts in rows:
+    seen: dict[tuple, list[tuple]] = defaultdict(list)
+    for stop, line, veh, direction, polled, exp, tts in rows:
         lst = polls_by_stop[stop]
         if not lst or lst[-1] != polled:
             lst.append(polled)
-        last_seen[(stop, line, veh)] = (polled, exp, tts)
+        seen[(stop, line, veh, direction)].append((polled, exp, tts))
 
-    existing = {
-        (o.stop_id, o.line_id, o.vehicle_id)
-        for o in s.scalars(select(ObservedArrival).where(ObservedArrival.source == source,
-                                                         ObservedArrival.arrived_at >= since))
-    }
+    existing: dict[tuple, list[datetime]] = defaultdict(list)
+    for o in s.scalars(select(ObservedArrival).where(ObservedArrival.source == source,
+                                                     ObservedArrival.arrived_at >= since - DEDUPE_WINDOW)):
+        existing[(o.stop_id, o.line_id, o.vehicle_id, o.direction)].append(o.arrived_at)
     created = 0
-    for key, (polled, exp, tts) in last_seen.items():
-        if key in existing or tts > ARRIVAL_COUNTDOWN_MAX_S:
+
+    def record(key, est, earliest, latest, quality):
+        nonlocal created
+        if any(abs((est - t).total_seconds()) < DEDUPE_WINDOW.total_seconds() for t in existing[key]):
+            return
+        existing[key].append(est)
+        s.add(ObservedArrival(source=source, stop_id=key[0], line_id=key[1], vehicle_id=key[2], direction=key[3],
+                              arrived_at=est, earliest=earliest, latest=latest, method="countdown_inferred",
+                              quality=quality))
+        created += 1
+
+    for key, seq in seen.items():
+        last_polled = seq[-1][0]
+        later = [p for p in polls_by_stop[key[0]] if p > last_polled]
+        if len(later) < GONE_POLLS:
+            continue  # still on the board, or may just be flickering
+        at_platform = [x for x in seq if x[2] <= AT_PLATFORM_S]
+        if at_platform:
+            first_p, first_exp, _ = at_platform[0]
+            if (at_platform[-1][0] - first_p).total_seconds() > MAX_DWELL_S:
+                continue
+            idx = seq.index(at_platform[0])
+            prev = seq[idx - 1][0] if idx > 0 else first_p - timedelta(seconds=60)
+            est = max(first_exp, first_p)
+            latest = est + timedelta(seconds=AT_PLATFORM_S)
+            gap = (first_p - prev).total_seconds()
+            record(key, est, prev, latest, round(max(0.0, 1 - gap / 300), 3))
             continue
-        later = [p for p in polls_by_stop[key[0]] if p > polled]
-        if not later:
-            continue  # still on the board (or no newer poll yet)
+        polled, exp, tts = seq[-1]
+        if tts > ARRIVAL_COUNTDOWN_MAX_S:
+            continue
         missing_at = later[0]
         gap = (missing_at - polled).total_seconds()
         if gap > 300:
             continue  # feed gap — too uncertain to call
         est = min(max(exp, polled), missing_at)
         quality = round(max(0.0, 1 - gap / 300) * (1 - tts / (ARRIVAL_COUNTDOWN_MAX_S * 2)), 3)
-        s.add(ObservedArrival(source=source, stop_id=key[0], line_id=key[1], vehicle_id=key[2], arrived_at=est,
-                              earliest=polled, latest=missing_at, method="countdown_inferred", quality=quality))
-        created += 1
+        record(key, est, polled, missing_at, quality)
     return created
 
 

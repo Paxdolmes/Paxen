@@ -46,3 +46,25 @@ def test_correction_model_beats_provider_and_is_promoted(session):
 def test_not_promoted_without_enough_data(session):
     backfill_recorder(session, SimProvider("normal"), MORNING, hours=0.1, stops=STOPS)
     assert train_and_maybe_promote(session, "sim")["status"] == "insufficient_data"
+
+
+def test_inference_uses_platform_time_and_skips_terminus_layovers(session):
+    """Real TfL behaviour: trains sit at 'due' at a terminus for many minutes before departing."""
+    from paxen.db import Prediction
+    from paxen.recorder import infer_arrivals
+
+    t0 = MORNING.replace(tzinfo=None)
+    def poll(i, vehicle, tts):
+        p = t0 + timedelta(seconds=30 * i)
+        session.add(Prediction(source="tfl", polled_at=p, stop_id="S", line_id="L", mode="tube", vehicle_id=vehicle,
+                               expected_arrival=p + timedelta(seconds=tts), tts_s=tts))
+    for i, tts in enumerate([200, 90, 20, 0]):       # arrives during poll 2..3, then sits briefly
+        poll(i, "A", tts)
+    for i in range(14):                              # B is shown as 'due' for 7 minutes: a layover
+        poll(i, "B", 0)
+    poll(14, "C", 600)                               # a later poll at the stop: A and B have left the board
+    session.commit()
+    infer_arrivals(session, "tfl", MORNING + timedelta(minutes=8))
+    obs = {o.vehicle_id: o for o in session.scalars(select(ObservedArrival))}
+    assert set(obs) == {"A"}
+    assert obs["A"].arrived_at == t0 + timedelta(seconds=60 + 20)  # first at-platform poll + its countdown
