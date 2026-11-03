@@ -63,15 +63,18 @@ PAXEN_RUN_WORKERS=0
    TFL_APP_KEY=<your TfL "paxen" primary key>
    PAXEN_POLL_INTERVAL=30
    PAXEN_RECORD_MODES=tube,overground,elizabeth-line,dlr,tram
-   PAXEN_ARCHIVE_ONLY_MODES=bus
-   PAXEN_ARCHIVE_ONLY_INTERVAL=120
-   PAXEN_PREDICTION_RETENTION_DAYS=60
+   PAXEN_ARCHIVE_ONLY_MODES=
+   PAXEN_PREDICTION_RETENTION_DAYS=14
    PAXEN_ARCHIVE_URL=s3://paxen-raw/london
    AWS_ACCESS_KEY_ID=<R2 Access Key ID>
    AWS_SECRET_ACCESS_KEY=<R2 Secret Access Key>
    AWS_ENDPOINT_URL=<R2 endpoint for S3 clients>
    AWS_REGION=auto
    ```
+
+   `PAXEN_ARCHIVE_ONLY_MODES=` (empty) leaves out the network-wide bus archive (~$12/month extra, and not usable for
+   training until BODS is connected). To add it later: `PAXEN_ARCHIVE_ONLY_MODES=bus` and
+   `PAXEN_ARCHIVE_ONLY_INTERVAL=120`.
 
 ## Step 5: Check the backend (~2 min)
 
