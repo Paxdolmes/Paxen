@@ -35,7 +35,8 @@ class Settings:
     # Defaults to London rail when using TfL; set to "" to record only the stops users' commutes use.
     record_modes: list[str] = field(default_factory=lambda: [m.strip() for m in os.getenv(
         "PAXEN_RECORD_MODES",
-        "tube,overground,elizabeth-line,dlr,tram" if os.getenv("PAXEN_PROVIDER", "sim") == "tfl" else "",
+        # DLR is left out: TfL's DLR predictions carry no vehicle id, so arrivals can't be tracked.
+        "tube,overground,elizabeth-line,tram" if os.getenv("PAXEN_PROVIDER", "sim") == "tfl" else "",
     ).split(",") if m.strip()])
     # Modes too large for the database (buses: ~100 MB per poll) are archived whole on a slower cycle.
     # Needs PAXEN_ARCHIVE_URL; buses on users' routes are still recorded in detail in the database.

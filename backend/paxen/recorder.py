@@ -128,6 +128,7 @@ class LeadSampler:
 
 
 SAMPLER = LeadSampler()
+_NETWORK_PEAK: dict[str, float] = {}
 
 
 def record_network(s: Session, provider: Provider, mode: str, now: datetime, cats: dict[str, str],
@@ -157,6 +158,12 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
         and sampler.keep((a.stop_id, a.line_id, a.vehicle_id, a.direction), a.time_to_station_s, now)]
     if rows:
         s.execute(insert(Prediction), rows)
+    # A whole network suddenly reporting far fewer trains usually means a stale/partial upstream response.
+    peak = _NETWORK_PEAK.get(mode, 0)
+    _NETWORK_PEAK[mode] = max(peak * 0.999, len(res.items))
+    if peak > 200 and len(res.items) < peak * 0.4:
+        log.warning("network poll for %s returned %d predictions (recent peak %d): partial upstream data?",
+                    mode, len(res.items), int(peak))
     return {"mode": mode, "seen": len(res.items), "kept": len(rows), "archived": bool(key)}
 
 

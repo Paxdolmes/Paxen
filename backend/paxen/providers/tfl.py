@@ -98,6 +98,12 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
     return sorted(best.values(), key=lambda x: x.time_to_station_s)
 
 
+def _cache_buster() -> str:
+    """TfL sits behind a shared cache (varnish, s-maxage=60). From some hosting regions it served stale,
+    partial network-wide responses; a unique query parameter forces a fresh response (TfL ignores it)."""
+    return str(time.time_ns())
+
+
 def parse_mode_arrivals(payload: list[dict]) -> list[Arrival]:
     """Network-wide arrivals: group by stop, then apply the per-stop rules (terminus de-duplication)."""
     by_stop: dict[str, list[dict]] = {}
@@ -260,7 +266,7 @@ class TflProvider:
 
     def mode_arrivals_raw(self, mode: str) -> tuple[bytes, int, int]:
         """The raw network-wide response, unparsed (the bus network is ~100 MB: archive it, don't parse it)."""
-        params = {"count": "-1", **({"app_key": self.app_key} if self.app_key else {})}
+        params = {"count": "-1", "_": _cache_buster(), **({"app_key": self.app_key} if self.app_key else {})}
         t0 = time.monotonic()
         r = self.client.get(f"{self.base}/Mode/{mode}/Arrivals", params=params, timeout=180)
         r.raise_for_status()
@@ -269,7 +275,7 @@ class TflProvider:
     def mode_arrivals(self, mode: str, now: datetime) -> FetchResult:
         """Every live prediction for a whole mode (e.g. all Tube stations) in one request."""
         path = f"/Mode/{mode}/Arrivals"
-        data, raw, status, latency = self._get(path, {"count": "-1"})
+        data, raw, status, latency = self._get(path, {"count": "-1", "_": _cache_buster()})
         return FetchResult(parse_mode_arrivals(data), raw, path, status, latency)
 
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult:
