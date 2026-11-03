@@ -262,6 +262,14 @@ class SimProvider:
                            "feed_timestamp": a.feed_timestamp.isoformat()} for a in items])
         return FetchResult(items=items, raw=raw, endpoint=f"sim:/StopPoint/{stop_id}/Arrivals")
 
+    def mode_arrivals(self, mode: str, now: datetime) -> FetchResult:
+        stops = sorted({sid for line in LINES.values() if line.mode == mode for sid in line.stops})
+        items: list[Arrival] = []
+        for sid in stops:
+            items += [a for a in self.arrivals(sid, now).items if a.mode == mode]
+        raw = json.dumps([{"stop": a.stop_id, "vehicle": a.vehicle_id, "tts": a.time_to_station_s} for a in items])
+        return FetchResult(items=items, raw=raw, endpoint=f"sim:/Mode/{mode}/Arrivals")
+
     # ---- status ---------------------------------------------------------------
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult:
         dis = self.disruptions(now)

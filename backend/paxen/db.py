@@ -125,6 +125,7 @@ class RawSnapshot(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     item_count: Mapped[int] = mapped_column(Integer, default=0)
     payload: Mapped[str | None] = mapped_column(Text)
+    archive_key: Mapped[str | None] = mapped_column(String(300))  # where the full raw response was archived
     error: Mapped[str | None] = mapped_column(Text)
 
 
@@ -211,7 +212,8 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 # Additive column changes for databases created by earlier versions (no migration framework yet).
-_ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)")]
+_ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
+                  ("raw_snapshots", "archive_key", "VARCHAR(300)")]
 
 
 def init_db(eng=None) -> None:

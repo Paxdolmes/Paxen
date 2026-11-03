@@ -58,6 +58,15 @@ def _dt(s: str | None) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=LONDON)  # journey planner times are London local
 
 
+def _tts(a: dict, exp: datetime, ts: datetime | None) -> int:
+    """Seconds to arrival. The network-wide endpoint omits timeToStation, so derive it from the feed's own
+    timestamp (not our clock) and the expected arrival."""
+    if a.get("timeToStation") is not None:
+        return int(a["timeToStation"])
+    ref = ts or datetime.now(timezone.utc)
+    return max(0, int(round((exp - ref).total_seconds())))
+
+
 def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
     """Normalise TfL arrivals.
 
@@ -79,7 +88,7 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
             line_id=a.get("lineId", ""), line_name=a.get("lineName", ""), mode=a.get("modeName", ""),
             direction=_clean_name(a.get("destinationName") or a.get("direction") or ""),
             destination=_clean_name(a.get("destinationName", "")),
-            expected_arrival=exp, time_to_station_s=int(a.get("timeToStation", 0)),
+            expected_arrival=exp, time_to_station_s=_tts(a, exp, ts),
             feed_timestamp=ts or datetime.now(timezone.utc), platform=a.get("platformName"),
             terminates_here=terminates,
         )
@@ -87,6 +96,18 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
         if key not in best or arr.time_to_station_s < best[key].time_to_station_s:
             best[key] = arr
     return sorted(best.values(), key=lambda x: x.time_to_station_s)
+
+
+def parse_mode_arrivals(payload: list[dict]) -> list[Arrival]:
+    """Network-wide arrivals: group by stop, then apply the per-stop rules (terminus de-duplication)."""
+    by_stop: dict[str, list[dict]] = {}
+    for a in payload:
+        if a.get("naptanId"):
+            by_stop.setdefault(a["naptanId"], []).append(a)
+    out: list[Arrival] = []
+    for stop_id, rows in by_stop.items():
+        out += parse_arrivals(rows, stop_id)
+    return out
 
 
 def parse_statuses(payload: list[dict]) -> list[LineStatus]:
@@ -236,6 +257,20 @@ class TflProvider:
         res = FetchResult(parse_arrivals(data, stop_id), raw, path, status, latency)
         self._arrivals_cache[stop_id] = (time.monotonic(), res)
         return res
+
+    def mode_arrivals_raw(self, mode: str) -> tuple[bytes, int, int]:
+        """The raw network-wide response, unparsed (the bus network is ~100 MB: archive it, don't parse it)."""
+        params = {"count": "-1", **({"app_key": self.app_key} if self.app_key else {})}
+        t0 = time.monotonic()
+        r = self.client.get(f"{self.base}/Mode/{mode}/Arrivals", params=params, timeout=180)
+        r.raise_for_status()
+        return r.content, r.status_code, int((time.monotonic() - t0) * 1000)
+
+    def mode_arrivals(self, mode: str, now: datetime) -> FetchResult:
+        """Every live prediction for a whole mode (e.g. all Tube stations) in one request."""
+        path = f"/Mode/{mode}/Arrivals"
+        data, raw, status, latency = self._get(path, {"count": "-1"})
+        return FetchResult(parse_mode_arrivals(data), raw, path, status, latency)
 
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult:
         path = f"/Line/{','.join(line_ids)}/Status" if line_ids else f"/Line/Mode/{STATUS_MODES}/Status"

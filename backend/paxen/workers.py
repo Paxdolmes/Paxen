@@ -27,7 +27,19 @@ def recorder_tick() -> dict:
     provider = get_provider()
     with SessionLocal() as s:
         extra = PILOT_STOPS_SIM if isinstance(provider, SimProvider) else []
-        return record_once(s, provider, utcnow(), extra)
+        return record_once(s, provider, utcnow(), extra, modes=settings.record_modes)
+
+
+def archive_tick() -> list[dict]:
+    """Whole-network archive of modes too big for the database (buses)."""
+    from .archive import get_archive
+    from .recorder import archive_network
+
+    provider = get_provider()
+    if get_archive() is None or not hasattr(provider, "mode_arrivals_raw"):
+        return []
+    with SessionLocal() as s:
+        return [archive_network(s, provider, m, utcnow()) for m in settings.archive_only_modes]
 
 
 def monitor_tick() -> int:
@@ -74,3 +86,11 @@ def start(loop_tasks: list) -> None:
     loop_tasks.append(asyncio.create_task(_loop(recorder_tick, settings.poll_interval_s, "recorder")))
     loop_tasks.append(asyncio.create_task(_loop(monitor_tick, settings.monitor_interval_s, "monitor")))
     loop_tasks.append(asyncio.create_task(_loop(train_tick, settings.train_interval_s, "train")))
+    from .archive import get_archive
+
+    if settings.archive_only_modes:
+        if get_archive() is None:
+            log.warning("PAXEN_ARCHIVE_ONLY_MODES=%s set but PAXEN_ARCHIVE_URL is not: skipping the bus archive",
+                        settings.archive_only_modes)
+        else:
+            loop_tasks.append(asyncio.create_task(_loop(archive_tick, settings.archive_only_interval_s, "archive")))

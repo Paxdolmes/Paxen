@@ -168,3 +168,12 @@ def test_crowding_profile_relative_to_station_peak():
     at = crowding_at(prof, datetime(2026, 11, 3, 8, 20, tzinfo=LONDON))
     assert at["band"] == "08:15" and at["ratio"] == 0.94 and at["day"] == "Tue"
     assert parse_crowding_profile({"isFound": False, "timeBands": []}) is None
+
+
+def test_network_endpoint_without_time_to_station():
+    from paxen.providers.tfl import parse_mode_arrivals
+    rows = [{"naptanId": "910GACTONML", "lineId": "elizabeth", "vehicleId": "2026110367", "timeToStation": None,
+             "timestamp": "2026-11-03T14:16:17.343Z", "expectedArrival": "2026-11-03T14:24:17Z",
+             "destinationName": "Heathrow Terminal 4 Rail Station"}]
+    [a] = parse_mode_arrivals(rows)
+    assert a.time_to_station_s == 480 and a.stop_id == "910GACTONML" and a.direction == "Heathrow Terminal 4"
