@@ -196,8 +196,12 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                         continue
                     rank, gap = qc.get(id(a), (None, None))
                     age = (ctx.now - aware(a.feed_timestamp)).total_seconds() if a.feed_timestamp else None
-                    p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, cat != GOOD,
-                                          category=cat, queue_rank=rank, gap_s=gap, feed_age_s=age, weekend=weekend)
+                    # The model was trained with the line-wide status (what the recorder stores), so give it the same
+                    # definition here; `cat` (section-aware, for this leg) still drives the engine's own adjustments.
+                    line_cat = ctx.category(a.line_id)
+                    p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, line_cat != GOOD,
+                                          category=line_cat, queue_rank=rank, gap_s=gap, feed_age_s=age,
+                                          weekend=weekend)
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
                     if a.terminates_here:
                         when += timedelta(seconds=TERMINUS_TURNAROUND_S)

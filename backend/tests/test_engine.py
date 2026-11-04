@@ -122,3 +122,29 @@ def test_crowding_uses_station_data_when_available(session):
     assert label({**peak, "ratio": 0.2})["level"] == "quiet"
     assert label({**peak, "ratio": 0.4, "live_vs_typical": 1.5})["label"] == "Busier than usual right now"
     assert label(peak, "victoria-severe")["level"] == "very_busy"  # disruption overrides
+
+
+def test_model_gets_the_same_disruption_definition_it_was_trained_with(session):
+    """Training labels predictions with the line-wide status; serving must too (not the section-aware one)."""
+    from paxen.domain import LineStatus, StatusSection
+    from paxen.engine import NetworkContext, forecast_journey
+
+    seen = []
+
+    class Spy:
+        version = None
+
+        def predict(self, line, stop, lead_s, band, disrupted, **ctx):
+            seen.append((disrupted, ctx.get("category")))
+            return {"bias_s": 0.0, "q10_s": -30.0, "q90_s": 60.0, "support": 0}
+
+    p = SimProvider("normal")
+    j = next(j for j in p.journeys(HOME, WORK, MORNING) if j.summary == "Victoria")
+    # Severe delays on the Victoria line, but only at stations this journey never uses
+    statuses = {s.line_id: s for s in p.line_statuses(MORNING).items}
+    statuses["victoria"] = LineStatus("victoria", "Victoria", "tube", "severe", "Severe delays", None,
+                                      sections=[StatusSection("severe", frozenset({"brixton"}))])
+    ctx = NetworkContext(p, MORNING, statuses, Spy())
+    f = forecast_journey(j, ctx, MORNING)
+    assert f.legs[1].category == "good"  # the journey itself is unaffected...
+    assert seen and all(d is True and c == "severe" for d, c in seen)  # ...but the model sees what it trained on
