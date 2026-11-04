@@ -163,3 +163,13 @@ def test_conformal_round_trips_and_noise_gives_no_winner():
     b = again.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted)
     assert a == b
     assert evaluate(synth(11, bias=False, seed=4), FAST)["winner"] is None  # still nothing invented from noise
+
+
+def test_gbm_copes_with_signals_missing_from_older_recordings():
+    """Rows recorded before queue/gap/feed-age existed have no values: the model must still fit and predict."""
+    xs = synth(2, bias=True, seed=11)
+    for x in xs:
+        x.queue_rank = x.gap_s = x.feed_age_s = None
+    m = GBMModel.from_params(GBMModel.fit(xs).to_params())
+    p = m.predict(xs[0].line_id, xs[0].stop_id, xs[0].lead_s, xs[0].band, False, queue_rank=2, gap_s=120)
+    assert p["q10_s"] <= p["bias_s"] <= p["q90_s"]

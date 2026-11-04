@@ -113,8 +113,11 @@ class GBMModel:
     MAX_TRAIN = 300_000
     MAX_STOPS = 250  # most frequent stops get their own category; the rest share one
 
-    def __init__(self, models=None, lines=None, stops=None):
+    def __init__(self, models=None, lines=None, stops=None, keep=None):
         self.models, self.lines, self.stops = models or {}, lines or [], stops or []
+        # Feature columns used: a column with no observed values (e.g. recorded before that signal existed)
+        # can't be binned, so it's dropped at fit time and the same columns are used when predicting.
+        self.keep = keep
 
     def _row(self, line, stop, lead_s, band, disrupted, category=None, queue_rank=None, gap_s=None,
              feed_age_s=None, weekend=None):
@@ -148,6 +151,8 @@ class GBMModel:
                              x.feed_age_s, x.weekend) for x in samples], dtype=float)
         y = np.array([x.error_s for x in samples], dtype=float)
         categorical = [False, True, True, True, False, False, False, True, True]
+        m.keep = [i for i in range(X.shape[1]) if not np.isnan(X[:, i]).all()]
+        X, categorical = X[:, m.keep], [categorical[i] for i in m.keep]
         m.models = {}
         for name, q in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9)):
             est = HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=200, learning_rate=0.08,
@@ -161,6 +166,8 @@ class GBMModel:
 
         row = np.array([self._row(line, stop, lead_s, band, disrupted, **{k: ctx.get(k) for k in
                         ("category", "queue_rank", "gap_s", "feed_age_s", "weekend")})], dtype=float)
+        if self.keep is not None:
+            row = row[:, self.keep]
         q10, q50, q90 = (float(self.models[n].predict(row)[0]) for n in ("q10", "q50", "q90"))
         return {"bias_s": q50, "q10_s": min(q10, q50), "q90_s": max(q90, q50), "support": 1}
 
@@ -171,6 +178,8 @@ class GBMModel:
             return []
         X = np.array([self._row(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, x.category, x.queue_rank,
                                 x.gap_s, x.feed_age_s, x.weekend) for x in samples], dtype=float)
+        if self.keep is not None:
+            X = X[:, self.keep]
         q = {n: self.models[n].predict(X) for n in ("q10", "q50", "q90")}
         return [{"bias_s": float(b), "q10_s": float(min(a, b)), "q90_s": float(max(c, b)), "support": 1}
                 for a, b, c in zip(q["q10"], q["q50"], q["q90"])]
@@ -180,14 +189,14 @@ class GBMModel:
 
         buf = io.BytesIO()
         pickle.dump(self.models, buf)
-        return {"model": self.kind, "lines": self.lines, "stops": self.stops,
+        return {"model": self.kind, "lines": self.lines, "stops": self.stops, "keep": self.keep,
                 "blob": base64.b64encode(buf.getvalue()).decode()}
 
     @classmethod
     def from_params(cls, p: dict) -> "GBMModel":
         import pickle
 
-        return cls(pickle.loads(base64.b64decode(p["blob"])), p.get("lines", []), p.get("stops", []))
+        return cls(pickle.loads(base64.b64decode(p["blob"])), p.get("lines", []), p.get("stops", []), p.get("keep"))
 
 
 CANDIDATES = {"provider": ProviderModel, "hier": HierModel, "hier_ctx": HierCtxModel, "gbm": GBMModel}
