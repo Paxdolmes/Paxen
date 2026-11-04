@@ -56,3 +56,23 @@ def test_gbm_learns_the_bias_and_round_trips():
     x = test[0]
     assert abs(again.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, queue_rank=x.queue_rank,
                              gap_s=x.gap_s, feed_age_s=x.feed_age_s)["bias_s"] - preds[0]["bias_s"]) < 1e-6
+
+
+def test_app_summary_reads_protocol_reports(session):
+    from paxen.db import ModelVersion
+    from paxen.evaluate import _slim
+    from paxen.insights import model_summary
+
+    rep = evaluate(synth(9, bias=True), FAST)
+    session.add(ModelVersion(kind="arrival_correction:tfl", params={"model": "provider"}, metrics=_slim(rep),
+                             active=False, note=rep["message"]))
+    session.commit()
+    m = model_summary(session, "tfl")
+    assert m["status"] == "no_model" and "9 of 10 days" in m["message"]
+
+    rep = evaluate(synth(11, bias=True), FAST)
+    session.add(ModelVersion(kind="arrival_correction:tfl", params={"model": "provider"}, metrics=_slim(rep),
+                             active=False, note=rep["message"]))
+    session.commit()
+    m = model_summary(session, "tfl")
+    assert m["provider"]["mae_s"] > m["corrected"]["mae_s"] and m["by_lead"] and m["candidate"] == "hier"

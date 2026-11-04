@@ -15,23 +15,40 @@ from .timeutil import naive_utc
 
 
 def model_summary(s: Session, source: str = "sim") -> dict:
+    """What the app shows about the arrival model. Understands both the rolling-day protocol's reports
+    (paxen.evaluate) and the older single-split format."""
     mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source))
                    .order_by(ModelVersion.id.desc())).first()
     active = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source),
                                                   ModelVersion.active.is_(True)).order_by(ModelVersion.id.desc())).first()
     if not mv:
-        return {"status": "no_model", "message": "Collecting data — the correction model trains once enough arrivals "
-                                                 "have been observed."}
-    m = (active or mv).metrics
-    return {
-        "status": "active" if active else "shadow",
-        "version": (active or mv).id,
-        "trained_at": (active or mv).created_at.isoformat() + "Z",
-        "provider": m.get("provider"), "corrected": m.get("corrected"),
-        "interval_coverage": m.get("interval_coverage_p10_p90"),
-        "by_lead": m.get("by_lead"), "by_line": m.get("by_line"),
-        "note": (active or mv).note,
-    }
+        return {"status": "no_model", "message": "Collecting data: the correction model is judged once enough "
+                                                 "arrivals have been observed."}
+    row = active or mv
+    m = row.metrics or {}
+    base = {"status": "active" if active else "shadow", "version": row.id,
+            "trained_at": row.created_at.isoformat() + "Z", "note": row.note}
+    if "summary" in m or "status" in m:  # rolling-day protocol report
+        if m.get("status") == "not_enough_data":
+            need = m.get("rules", {}).get("min_train_days", 7) + m.get("rules", {}).get("min_test_days", 3)
+            return {**base, "status": "no_model",
+                    "message": f"Collecting data: {m.get('days', 0)} of {need} days needed before Paxen judges a "
+                               f"correction against TfL's own countdowns. Until then you see TfL's numbers."}
+        latest = next(iter((m.get("latest_day") or {}).values()), {})
+        summary = m.get("summary") or {}
+        challengers = [k for k in summary if k != "provider"]
+        pick = m.get("winner") or (min(challengers, key=lambda k: summary[k]["mean_mae_s"]) if challengers else None)
+        prov, corr = latest.get("provider"), latest.get(pick) if pick else None
+        by_lead = None
+        if prov and corr and prov.get("by_lead") and corr.get("by_lead"):
+            by_lead = {b: {"provider": prov["by_lead"][b], "corrected": corr["by_lead"].get(b, {})}
+                       for b in prov["by_lead"]}
+        return {**base, "provider": prov, "corrected": corr, "interval_coverage": (corr or {}).get("coverage"),
+                "by_lead": by_lead, "candidate": pick, "ground_truth": m.get("ground_truth"),
+                "message": m.get("message")}
+    return {**base, "provider": m.get("provider"), "corrected": m.get("corrected"),
+            "interval_coverage": m.get("interval_coverage_p10_p90"), "by_lead": m.get("by_lead"),
+            "by_line": m.get("by_line")}
 
 
 def personal_summary(s: Session, user_id: str, now: datetime) -> dict:

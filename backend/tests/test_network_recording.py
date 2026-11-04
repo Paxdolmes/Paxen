@@ -108,3 +108,35 @@ def test_misconfigured_archive_never_breaks_recording(session, monkeypatch):
     monkeypatch.setattr(arch, "get_archive", broken)
     r = rec.record_network(session, SimProvider("normal"), "tube", MORNING, {}, sampler=LeadSampler())
     assert r["kept"] > 0 and r["archived"] is False
+
+
+def test_retention_covers_every_recording_table(session):
+    from paxen.db import LineStatusSnapshot
+    from paxen.recorder import prune
+    old, new = (MORNING - timedelta(days=20)).replace(tzinfo=None), MORNING.replace(tzinfo=None)
+    for t in (old, new):
+        session.add(ObservedArrival(source="sim", stop_id="S", line_id="L", vehicle_id="V", arrived_at=t,
+                                    earliest=t, latest=t, method="trackernet", quality=1.0))
+        session.add(LineStatusSnapshot(source="sim", polled_at=t, line_id="L", line_name="L", mode="tube",
+                                       category="good", description="Good service"))
+        session.add(RawSnapshot(source="sim", endpoint="x", polled_at=t, status=200, payload="{}"))
+    session.commit()
+    prune(session, MORNING, prediction_days=14)
+    for model in (ObservedArrival, LineStatusSnapshot, RawSnapshot):
+        assert session.scalar(select(func.count()).select_from(model)) == 1
+    assert session.scalars(select(RawSnapshot)).one().payload == "{}"  # recent payload kept (< 2 days)
+
+
+def test_per_stop_raw_responses_go_to_the_archive_in_one_object(session, tmp_path):
+    import paxen.archive as arch
+    arch.get_archive.cache_clear()
+    import os
+    os.environ["PAXEN_ARCHIVE_URL"] = f"file://{tmp_path}"
+    try:
+        record_once(session, SimProvider("normal"), MORNING, extra_stops=["walthamstow-central", "oxford-circus"])
+    finally:
+        del os.environ["PAXEN_ARCHIVE_URL"]
+        arch.get_archive.cache_clear()
+    snaps = session.scalars(select(RawSnapshot).where(RawSnapshot.endpoint.like("%StopPoint%"))).all()
+    assert len(snaps) == 2 and all(s.payload is None and s.archive_key for s in snaps)
+    assert len(list(tmp_path.rglob("stops-*.json.gz"))) == 1

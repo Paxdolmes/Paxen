@@ -23,7 +23,7 @@ from .timeutil import aware, naive_utc
 
 log = logging.getLogger("paxen.recorder")
 
-KEEP_RAW_PAYLOAD_DAYS = 14
+KEEP_RAW_PAYLOAD_DAYS = 2  # database copies of raw responses; the archive (R2) keeps the originals
 ARRIVAL_COUNTDOWN_MAX_S = 120  # last sighting must be this close to arrival to infer an arrival
 WATCH_TTL = timedelta(days=7)
 
@@ -75,7 +75,9 @@ def queue_context(items) -> dict[int, tuple[int, int | None]]:
     return out
 
 
-def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime, cats: dict[str, str]) -> int:
+def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime, cats: dict[str, str],
+                    pending: list | None = None) -> int:
+    """pending: if given, the raw response is held for one batched archive write instead of the database."""
     polled = naive_utc(now)
     try:
         try:
@@ -88,7 +90,10 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
         log.warning("arrivals poll failed for %s: %s", stop_id,redact(e))
         return 0
     raw = RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
-                      latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw)
+                      latency_ms=res.latency_ms, item_count=len(res.items),
+                      payload=None if pending is not None else res.raw)
+    if pending is not None:
+        pending.append((raw, stop_id, res.raw))
     s.add(raw)
     s.flush()
     qc = queue_context(res.items)
@@ -362,7 +367,17 @@ def record_once(s: Session, provider: Provider, now: datetime, extra_stops: list
     prefixes = tuple(p for m in modes or [] for p in NAPTAN_PREFIX_BY_MODE.get(m, ()))
     if network and prefixes:
         stops = [st for st in stops if not st.startswith(prefixes)]
-    n = sum(record_arrivals(s, provider, stop, now, cats) for stop in stops)
+    pending: list = []
+    n = sum(record_arrivals(s, provider, stop, now, cats, pending) for stop in stops)
+    if pending:  # one archive object per cycle; without an archive, keep the payloads in the database instead
+        import json
+
+        key = archive_raw(provider.name, "stops", now, json.dumps({stop: raw for _, stop, raw in pending}))
+        for snap, _, raw in pending:
+            if key:
+                snap.archive_key = key
+            else:
+                snap.payload = raw
     s.flush()
     inferred = infer_arrivals(s, provider.name, now)
     s.commit()
@@ -370,15 +385,20 @@ def record_once(s: Session, provider: Provider, now: datetime, extra_stops: list
 
 
 def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None:
-    """Retention. Raw payloads in the DB go after KEEP_RAW_PAYLOAD_DAYS. Predictions go after
-    PAXEN_PREDICTION_RETENTION_DAYS (default 60; 0 keeps forever): the raw archive keeps every original, and
-    inferred arrivals are kept, so the model's history isn't lost."""
+    """Retention. Predictions, arrivals, line-status snapshots and raw-snapshot rows go after
+    PAXEN_PREDICTION_RETENTION_DAYS (default 60; 0 keeps forever). Raw payloads in the database go after
+    KEEP_RAW_PAYLOAD_DAYS; the archive keeps every original, so history can be rebuilt."""
     import os
 
     days = prediction_days if prediction_days is not None else int(os.getenv("PAXEN_PREDICTION_RETENTION_DAYS", "60"))
     if days > 0:
-        s.query(Prediction).filter(Prediction.polled_at < naive_utc(now - timedelta(days=days))).delete(
+        old = naive_utc(now - timedelta(days=days))
+        s.query(Prediction).filter(Prediction.polled_at < old).delete(synchronize_session=False)
+        # Arrivals are only useful alongside predictions (kept one extra day so late pairs still match).
+        s.query(ObservedArrival).filter(ObservedArrival.arrived_at < old - timedelta(days=1)).delete(
             synchronize_session=False)
+        s.query(LineStatusSnapshot).filter(LineStatusSnapshot.polled_at < old).delete(synchronize_session=False)
+        s.query(RawSnapshot).filter(RawSnapshot.polled_at < old).delete(synchronize_session=False)
     cutoff = naive_utc(now - timedelta(days=KEEP_RAW_PAYLOAD_DAYS))
     s.query(RawSnapshot).filter(RawSnapshot.polled_at < cutoff, RawSnapshot.payload.is_not(None)).update(
         {RawSnapshot.payload: None}, synchronize_session=False)

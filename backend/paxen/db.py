@@ -176,7 +176,8 @@ class ObservedArrival(Base):
     latest: Mapped[datetime] = mapped_column(DateTime)
     method: Mapped[str] = mapped_column(String(30))  # countdown_inferred | feed_reported | avl_position
     quality: Mapped[float] = mapped_column(Float)
-    __table_args__ = (Index("ix_obs_vehicle", "source", "stop_id", "line_id", "vehicle_id", "arrived_at"),)
+    __table_args__ = (Index("ix_obs_vehicle", "source", "stop_id", "line_id", "vehicle_id", "arrived_at"),
+                      Index("ix_obs_arrived", "arrived_at"))
 
 
 class LineStatusSnapshot(Base):
@@ -242,6 +243,10 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("predictions", "gap_s", "INTEGER")]
 
 
+# Indexes added after a table existed (create_all doesn't add indexes to existing tables).
+_ADDED_INDEXES = [("ix_obs_arrived", "observed_arrivals", "arrived_at")]
+
+
 def init_db(eng=None) -> None:
     eng = eng or engine
     Base.metadata.create_all(eng)
@@ -250,3 +255,5 @@ def init_db(eng=None) -> None:
         for table, column, ddl in _ADDED_COLUMNS:
             if column not in {c["name"] for c in insp.get_columns(table)}:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        for name, table, column in _ADDED_INDEXES:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"))

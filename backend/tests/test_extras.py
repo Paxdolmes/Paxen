@@ -104,9 +104,12 @@ def test_live_trip_progress_and_auto_arrival(monkeypatch):
 
 
 def test_stale_trip_closed_without_learning_from_it(session):
-    from paxen.db import Trip
+    from paxen.db import Trip, User
     from paxen.live import close_stale
-    t = Trip(user_id="u", started_at=(MORNING - timedelta(hours=3)).replace(tzinfo=None), status="active",
+    u = User(token_hash="t" * 64)
+    session.add(u)
+    session.flush()
+    t = Trip(user_id=u.id, started_at=(MORNING - timedelta(hours=3)).replace(tzinfo=None), status="active",
              plan={"forecast": {"p90": 40}})
     session.add(t)
     session.commit()
