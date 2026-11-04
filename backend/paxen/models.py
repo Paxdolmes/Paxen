@@ -192,9 +192,79 @@ class GBMModel:
 
 CANDIDATES = {"provider": ProviderModel, "hier": HierModel, "hier_ctx": HierCtxModel, "gbm": GBMModel}
 
+COVERAGE_TARGET = 0.8  # p10-p90
+MIN_BUCKET_SCORES = 50
+
+
+def _predict_all(model, samples: list[Sample]) -> list[dict]:
+    if hasattr(model, "predict_many"):
+        return model.predict_many(samples)
+    return [model.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, category=x.category,
+                          queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend)
+            for x in samples]
+
+
+def conformal_quantile(scores: list[float], target: float = COVERAGE_TARGET) -> float:
+    """Split-conformal quantile with the finite-sample correction: the ceil((n+1)*target)-th smallest score."""
+    import math
+
+    n = len(scores)
+    k = math.ceil((n + 1) * target)
+    xs = sorted(scores)
+    return xs[min(k, n) - 1]
+
+
+class Conformal:
+    """Conformalized quantile regression (Romano et al., 2019), per lead bucket. See Amendment 1 (A1.3).
+
+    Fit: base model on all training days but the last; conformity scores max(q10 - y, y - q90) on the last
+    day; per-bucket quantile Q_b (pooled fallback for small buckets). Serve: base refitted on all training days,
+    interval [q10 - Q_b, q90 + Q_b]. Point predictions are the base model's, unchanged."""
+
+    def __init__(self, base, q: dict[str, float], kind: str):
+        self.base, self.q, self.kind = base, q, kind
+
+    @classmethod
+    def fit_with(cls, base_cls, samples: list[Sample]) -> "Conformal | object":
+        days = sorted({x.day for x in samples})
+        if len(days) < 2:
+            return base_cls.fit(samples)  # can't calibrate on a held-out day: serve the base model as-is
+        proper = [x for x in samples if x.day < days[-1]]
+        cal = [x for x in samples if x.day == days[-1]]
+        preds = _predict_all(base_cls.fit(proper), cal)
+        scores: dict[str, list[float]] = defaultdict(list)
+        for x, p in zip(cal, preds):
+            sc = max(p["q10_s"] - x.error_s, x.error_s - p["q90_s"])
+            scores[lead_bucket(x.lead_s)].append(sc)
+            scores["*"].append(sc)
+        q = {b: conformal_quantile(v) for b, v in scores.items() if b == "*" or len(v) >= MIN_BUCKET_SCORES}
+        return cls(base_cls.fit(samples), q, base_cls.kind)
+
+    def _widen(self, p: dict, lead_s: float) -> dict:
+        qb = self.q.get(lead_bucket(lead_s), self.q.get("*", 0.0))
+        lo, hi = p["q10_s"] - qb, p["q90_s"] + qb
+        if lo > hi:  # a negative Q can't invert the interval
+            lo = hi = p["bias_s"]
+        return {**p, "q10_s": min(lo, p["bias_s"]), "q90_s": max(hi, p["bias_s"])}
+
+    def predict(self, line, stop, lead_s, band, disrupted, **ctx) -> dict:
+        return self._widen(self.base.predict(line, stop, lead_s, band, disrupted, **ctx), lead_s)
+
+    def predict_many(self, samples: list[Sample]) -> list[dict]:
+        return [self._widen(p, x.lead_s) for x, p in zip(samples, _predict_all(self.base, samples))]
+
+    def to_params(self) -> dict:
+        return {"model": "conformal", "base": self.base.to_params(), "q": self.q, "kind": self.kind}
+
+    @classmethod
+    def from_params(cls, p: dict) -> "Conformal":
+        return cls(from_params(p["base"]), p.get("q", {}), p.get("kind", "?"))
+
 
 def from_params(params: dict):
     """Load any stored model. Old rows (before v2) have no 'model' key and are the hierarchical model."""
     kind = params.get("model", "hier")
+    if kind == "conformal":
+        return Conformal.from_params(params)
     cls = CANDIDATES[kind]
     return cls.from_params(params) if kind != "hier" else HierModel.from_params(params)

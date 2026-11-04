@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from .db import ModelVersion
 from .forecast import Sample, lead_bucket, load_samples, model_kind
-from .models import CANDIDATES, SIMPLICITY
+from .models import CANDIDATES, SIMPLICITY, Conformal
 
 log = logging.getLogger("paxen.evaluate")
 
@@ -26,6 +26,32 @@ MAE_GAIN = 0.03  # beat the provider's mean MAE by at least 3%
 WIN_SHARE = 2 / 3  # ... and on at least two-thirds of test days
 COVERAGE = (0.70, 0.90)  # honest 80% interval
 TIE = 0.01  # within 1%: the simpler model wins
+DECISION_BUCKETS = ("2-5m", "5-10m", "10-20m")  # Amendment 1, A1.2: horizons for "should I leave now?"
+
+
+def fit_candidate(name: str, cls, train: list[Sample]):
+    """Challengers get conformalized intervals (Amendment 1, A1.3); the provider baseline doesn't."""
+    return cls.fit(train) if name == "provider" else Conformal.fit_with(cls, train)
+
+
+def decision_mae(samples: list[Sample], preds: list[dict]) -> float | None:
+    """Amendment 1, A1.2: mean over the decision buckets of each bucket's MAE, where every arrival counts once
+    per bucket (its predictions in that bucket are averaged first). None if no decision bucket has data."""
+    per_bucket: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for x, p in zip(samples, preds):
+        b = lead_bucket(x.lead_s)
+        if b in DECISION_BUCKETS:
+            per_bucket[b][x.event or str(id(x))].append(abs(x.error_s - p["bias_s"]))
+    maes = [statistics.fmean(statistics.fmean(v) for v in events.values()) for events in per_bucket.values()]
+    return statistics.fmean(maes) if maes else None
+
+
+def _day_start_utc(day: str):
+    from datetime import datetime, timezone
+
+    from .timeutil import LONDON
+
+    return datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=LONDON).astimezone(timezone.utc)
 
 
 def _metrics(samples: list[Sample], preds: list[dict]) -> dict:
@@ -61,7 +87,8 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
     days = sorted(by_day)
     report: dict = {"days": len(days), "samples": len(samples), "rules": {
         "min_train_days": MIN_TRAIN_DAYS, "min_test_days": MIN_TEST_DAYS, "mae_gain": MAE_GAIN,
-        "win_share": WIN_SHARE, "coverage": COVERAGE}}
+        "win_share": WIN_SHARE, "coverage": COVERAGE, "decision_buckets": DECISION_BUCKETS,
+        "amendments": ["A1.1 purge", "A1.2 decision-horizon MAE", "A1.3 conformalized intervals"]}}
     n_test = min(MAX_TEST_DAYS, len(days) - MIN_TRAIN_DAYS)
     if n_test < MIN_TEST_DAYS:
         report.update(status="not_enough_data", winner=None,
@@ -70,12 +97,16 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
 
     per_day: dict[str, dict] = {}
     for d in days[-n_test:]:
-        train = [x for day in days if day < d for x in by_day[day]]
+        start = _day_start_utc(d)
+        # Amendment 1, A1.1: purge training samples whose outcome falls on or after the test day's start.
+        train = [x for day in days if day < d for x in by_day[day] if x.arrived_at is None or x.arrived_at < start]
         test = by_day[d]
         per_day[d] = {}
         for name, cls in candidates.items():
-            preds = _predict(cls.fit(train), test)
+            preds = _predict(fit_candidate(name, cls, train), test)
             per_day[d][name] = _metrics(test, preds)
+            per_day[d][name]["decision_mae_s"] = (lambda v: round(v, 1) if v is not None else None)(
+                decision_mae(test, preds))
             if name in ("provider",) or d == days[-1]:
                 per_day[d][name]["by_lead"] = _breakdown(test, preds, lambda x: lead_bucket(x.lead_s))
                 per_day[d][name]["by_line"] = _breakdown(test, preds, lambda x: x.line_id)
@@ -83,15 +114,23 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
 
     summary, eligible = {}, []
     prov = [per_day[d]["provider"]["mae_s"] for d in per_day]
+    prov_dec = [per_day[d]["provider"]["decision_mae_s"] for d in per_day]
     for name in candidates:
         maes = [per_day[d][name]["mae_s"] for d in per_day]
+        decs = [per_day[d][name]["decision_mae_s"] for d in per_day]
         cov = statistics.fmean(per_day[d][name]["coverage"] for d in per_day)
         wins = sum(m < p for m, p in zip(maes, prov))
         mean_mae, mean_prov = statistics.fmean(maes), statistics.fmean(prov)
+        paired = [(c, p) for c, p in zip(decs, prov_dec) if c is not None and p is not None]
+        mean_dec = statistics.fmean(c for c, _ in paired) if paired else None
+        mean_prov_dec = statistics.fmean(p for _, p in paired) if paired else None
         checks = {"mae_gain": mean_mae <= mean_prov * (1 - MAE_GAIN), "wins": wins >= len(maes) * WIN_SHARE,
-                  "coverage": COVERAGE[0] <= cov <= COVERAGE[1]}
+                  "coverage": COVERAGE[0] <= cov <= COVERAGE[1],
+                  # Amendment 1, A1.2 (no decision-horizon data at all counts as a fail: stricter, not looser)
+                  "decision_gain": mean_dec is not None and mean_dec <= mean_prov_dec * (1 - MAE_GAIN)}
         summary[name] = {"mean_mae_s": round(mean_mae, 1), "win_days": wins, "test_days": len(maes),
-                         "coverage": round(cov, 3), "checks": checks}
+                         "coverage": round(cov, 3), "checks": checks,
+                         "mean_decision_mae_s": round(mean_dec, 1) if mean_dec is not None else None}
         if name != "provider" and all(checks.values()):
             eligible.append(name)
     report["summary"] = summary
@@ -150,7 +189,7 @@ def run(s: Session, source: str, promote: bool = True) -> dict:
         s.query(ModelVersion).filter(ModelVersion.kind == kind, ModelVersion.active.is_(True)).update(
             {ModelVersion.active: False})
         if report["winner"]:
-            final = CANDIDATES[report["winner"]].fit(samples)
+            final = fit_candidate(report["winner"], CANDIDATES[report["winner"]], samples)
             s.add(ModelVersion(kind=kind, params=final.to_params(), metrics=_slim(report), active=True,
                                note=f"promoted by rolling-day protocol: {report['message']}"))
         else:

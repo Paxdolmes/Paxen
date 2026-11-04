@@ -50,6 +50,8 @@ class Sample:
     gap_s: int | None = None
     feed_age_s: float | None = None
     method: str = "countdown_inferred"
+    arrived_at: datetime | None = None  # the outcome's time (for purging at split boundaries)
+    event: str | None = None  # which arrival this prediction was about (stop|line|vehicle|time)
 
     @property
     def day(self) -> str:
@@ -76,6 +78,7 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
 
     q = (
         select(Prediction.id, Prediction.polled_at, Prediction.line_id, Prediction.stop_id, Prediction.tts_s,
+               Prediction.vehicle_id,
                Prediction.expected_arrival, Prediction.line_category, Prediction.direction, Prediction.platform,
                Prediction.queue_rank, Prediction.gap_s, Prediction.feed_ts,
                ObservedArrival.arrived_at, ObservedArrival.quality, ObservedArrival.method, ObservedArrival.direction)
@@ -93,8 +96,8 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
     if methods:
         q = q.where(ObservedArrival.method.in_(methods))
     best: dict[int, tuple] = {}
-    for (pid, polled, line, stop, tts, exp, cat, p_dir, platform, rank_q, gap, feed_ts, arrived, quality, method,
-         o_dir) in s.execute(q):
+    for (pid, polled, line, stop, tts, vehicle, exp, cat, p_dir, platform, rank_q, gap, feed_ts, arrived, quality,
+         method, o_dir) in s.execute(q):
         if method == "trackernet":
             b = bound_of(platform)
             if b and o_dir and b != o_dir:
@@ -108,7 +111,8 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
         if pid not in best or rank > best[pid][0]:
             age = (polled - feed_ts).total_seconds() if feed_ts else None
             best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",
-                                      err, quality, cat or "good", rank_q, gap, age, method))
+                                      err, quality, cat or "good", rank_q, gap, age, method, aware(arrived),
+                                      f"{stop}|{line}|{vehicle}|{arrived:%Y%m%d%H%M%S}"))
     out = [v[1] for v in best.values()]
     out.sort(key=lambda x: x.polled_at)
     return out
