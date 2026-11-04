@@ -16,6 +16,9 @@ from . import workers
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    # Request URLs carry the TfL app_key: never log them.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     init_db()
     tasks: list[asyncio.Task] = []
     workers.start(tasks)

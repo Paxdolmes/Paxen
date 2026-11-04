@@ -33,6 +33,9 @@ from .recorder import feed_health
 from .timeutil import aware, local, naive_utc, utcnow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# Request URLs carry the TfL app_key: never log them.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
