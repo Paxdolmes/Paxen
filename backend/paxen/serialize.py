@@ -13,7 +13,7 @@ def iso(dt):
 
 def place(p: Place) -> dict:
     return {"id": p.id, "label": p.label, "name": p.name, "lat": p.lat, "lon": p.lon, "source": p.source,
-            "confirmed": p.confirmed}
+            "confirmed": p.confirmed, "stops": p.preferred_stops or []}
 
 
 def commute(c: Commute) -> dict:
@@ -77,6 +77,7 @@ def evaluation(ev: CommuteEvaluation, now, max_options: int | None = None) -> di
         "delta_min": ev.delta_min,
         "gain_min": ev.gain_min,
         "preference": ev.preference,
+        "chosen_stops_honoured": ev.chosen_stops_honoured,
         "baseline": ev.baseline,
         "usual": option(ev.usual, ev) if ev.usual else None,
         "recommended": option(ev.recommended, ev) if ev.recommended else None,

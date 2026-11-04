@@ -19,7 +19,7 @@ import httpx
 
 from ..domain import (
     GOOD, MINOR, PART_SUSPENDED, SEVERE, SEVERITY_ORDER, SUSPENDED,
-    Arrival, FetchResult, Journey, Leg, LineStatus, PlaceResult, StatusSection,
+    Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult, StatusSection,
 )
 from ..timeutil import LONDON
 
@@ -102,6 +102,45 @@ def _cache_buster() -> str:
     """TfL sits behind a shared cache (varnish, s-maxage=60). From some hosting regions it served stale,
     partial network-wide responses; a unique query parameter forces a fresh response (TfL ignores it)."""
     return str(time.time_ns())
+
+
+def _walk_min(distance_m: float) -> float:
+    return max(1.0, round(distance_m * 1.3 / 75, 1))  # street detour factor, ~4.5 km/h
+
+
+def parse_nearby(payload: dict, kind: str) -> list[NearbyStop]:
+    out = []
+    for sp in payload.get("stopPoints") or []:
+        if "lat" not in sp:
+            continue
+        towards = next((p.get("value") for p in sp.get("additionalProperties") or []
+                        if p.get("key") == "Towards"), None)
+        modes = [m for m in sp.get("modes") or [] if m]
+        out.append(NearbyStop(
+            stop_id=sp.get("naptanId") or sp.get("id"), name=_clean_name(sp.get("commonName", "")), kind=kind,
+            lat=float(sp["lat"]), lon=float(sp["lon"]), distance_m=int(round(sp.get("distance") or 0)),
+            walk_min=_walk_min(sp.get("distance") or 0), modes=modes,
+            lines=[l.get("name") or l.get("id") for l in sp.get("lines") or []],
+            hub=sp.get("hubNaptanCode"), indicator=sp.get("indicator") if kind == "bus" else None, towards=towards,
+        ))
+    out.sort(key=lambda x: x.distance_m)
+    return merge_interchanges(out) if kind == "station" else out
+
+
+def merge_interchanges(stops: list[NearbyStop]) -> list[NearbyStop]:
+    """One row per station: TfL lists e.g. Walthamstow Central's Tube and Overground platforms as separate stops
+    of the same interchange (hub). Merge them, keeping the nearest entrance and every mode/line."""
+    merged: dict[str, NearbyStop] = {}
+    for st in stops:  # already nearest first
+        key = st.hub or st.name.lower()
+        if key not in merged:
+            merged[key] = st
+            continue
+        m = merged[key]
+        m.modes = sorted(set(m.modes) | set(st.modes))
+        m.lines = m.lines + [l for l in st.lines if l not in m.lines]
+        m.hub = m.hub or st.hub
+    return list(merged.values())
 
 
 def parse_mode_arrivals(payload: list[dict]) -> list[Arrival]:
@@ -316,6 +355,20 @@ class TflProvider:
     def search_places(self, query: str) -> list[PlaceResult]:
         data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 15})
         return parse_place_search(data)
+
+    def nearby_stops(self, lat: float, lon: float) -> list[NearbyStop]:
+        """Stations within ~1.2 km and the closest bus/tram stops within ~400 m, nearest first."""
+        stations, _, _, _ = self._get("/StopPoint", {
+            "lat": f"{lat:.5f}", "lon": f"{lon:.5f}", "radius": "1200",
+            "stopTypes": "NaptanMetroStation,NaptanRailStation"})
+        out = parse_nearby(stations, "station")
+        try:
+            buses, _, _, _ = self._get("/StopPoint", {
+                "lat": f"{lat:.5f}", "lon": f"{lon:.5f}", "radius": "400", "stopTypes": "NaptanPublicBusCoachTram"})
+            out += parse_nearby(buses, "bus")[:8]
+        except httpx.HTTPError:
+            pass  # stations alone are still useful
+        return out
 
     # ---- crowding (Underground stations only) ------------------------------------------
     def _cached(self, key: tuple, ttl: float, fetch):

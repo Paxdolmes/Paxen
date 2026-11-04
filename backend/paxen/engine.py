@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from .db import Alert, Commute, Trip, User
 from .domain import (
-    DEFAULT_HEADWAY_MIN, GOOD, MINOR, PART_SUSPENDED, SEVERE, SUSPENDED, Arrival, Journey, LineStatus,
+    Leg, DEFAULT_HEADWAY_MIN, GOOD, MINOR, PART_SUSPENDED, SEVERE, SUSPENDED, Arrival, Journey, LineStatus,
 )
 from .forecast import CorrectionModel, active_model
 from .providers.base import Provider
@@ -386,6 +386,7 @@ class CommuteEvaluation:
     headline: str
     detail: str
     preference: str
+    chosen_stops_honoured: bool = True
 
 
 def _fmt_min(x: float) -> str:
@@ -407,6 +408,80 @@ def _disruption_sentence(f: JourneyForecast | None, statuses: dict[str, LineStat
     return d["reason"] or f"{d['line_name']}: {d['description'].lower()}."
 
 
+# ------------------------------------------------------------------- chosen stations
+MAX_EXTRA_PLANS = 2  # per end: extra planner calls when a chosen station isn't in the planner's own answer
+
+
+def _norm(name: str | None) -> str:
+    n = (name or "").lower().replace("st.", "st").replace("&", "and")
+    for prefix in ("london ",):
+        n = n[len(prefix):] if n.startswith(prefix) else n
+    return " ".join(n.replace("'", "").split())
+
+
+def _stop_matches(stop_id: str | None, name: str | None, prefs: list[dict]) -> bool:
+    ids = {p["stop_id"] for p in prefs} | {p["hub"] for p in prefs if p.get("hub")}
+    names = {_norm(p["name"]) for p in prefs}
+    return bool(stop_id and stop_id in ids) or (bool(name) and _norm(name) in names)
+
+
+def uses_chosen_stops(j: Journey, origin_prefs: list[dict], dest_prefs: list[dict]) -> bool:
+    legs = j.transit_legs
+    if not legs:
+        return not origin_prefs and not dest_prefs
+    ok_o = not origin_prefs or _stop_matches(legs[0].from_stop_id, legs[0].from_name, origin_prefs)
+    ok_d = not dest_prefs or _stop_matches(legs[-1].to_stop_id, legs[-1].to_name, dest_prefs)
+    return ok_o and ok_d
+
+
+def _with_walk(j: Journey, walk: float, place_name: str, stop_name: str, at_start: bool) -> Journey:
+    """Add the walk between the user's address and their chosen station to a station-to-X journey."""
+    if at_start:
+        dep = j.departure - timedelta(minutes=walk)
+        leg = Leg("walking", walk, place_name, stop_name, dep, j.departure)
+        return Journey([leg] + j.legs, round(j.duration_min + walk, 1), dep, j.arrival, j.source)
+    arr = j.arrival + timedelta(minutes=walk)
+    leg = Leg("walking", walk, stop_name, place_name, j.arrival, arr)
+    return Journey(j.legs + [leg], round(j.duration_min + walk, 1), j.departure, arr, j.source)
+
+
+def apply_chosen_stops(provider: Provider, commute: Commute, depart_at: datetime,
+                       journeys: list[Journey]) -> tuple[list[Journey], bool]:
+    """Keep journeys that start and end at the user's chosen stations. If a chosen station isn't in the planner's
+    answer, plan from (or to) it directly and add the walk. Returns (journeys, honoured)."""
+    o, d = commute.origin, commute.dest
+    o_prefs, d_prefs = list(o.preferred_stops or []), list(d.preferred_stops or [])
+    if not o_prefs and not d_prefs:
+        return journeys, True
+    chosen = [j for j in journeys if uses_chosen_stops(j, o_prefs, d_prefs)]
+    covered_o = {_norm(j.transit_legs[0].from_name) for j in chosen if j.transit_legs}
+    covered_d = {_norm(j.transit_legs[-1].to_name) for j in chosen if j.transit_legs}
+    extra: list[Journey] = []
+    for p in [p for p in o_prefs if _norm(p["name"]) not in covered_o][:MAX_EXTRA_PLANS]:
+        walk = float(p.get("walk_min") or 5)
+        try:
+            for j in provider.journeys((p["lat"], p["lon"]), (d.lat, d.lon), depart_at + timedelta(minutes=walk)):
+                extra.append(_with_walk(j, walk, o.name, p["name"], at_start=True))
+        except Exception:
+            continue
+    for p in [p for p in d_prefs if _norm(p["name"]) not in covered_d][:MAX_EXTRA_PLANS]:
+        walk = float(p.get("walk_min") or 5)
+        try:
+            for j in provider.journeys((o.lat, o.lon), (p["lat"], p["lon"]), depart_at):
+                extra.append(_with_walk(j, walk, d.name, p["name"], at_start=False))
+        except Exception:
+            continue
+    chosen += [j for j in extra if uses_chosen_stops(j, o_prefs, d_prefs)]
+    if not chosen:
+        return journeys, False  # nothing runs via the chosen stations right now: show everything, say so
+    seen, out = set(), []
+    for j in sorted(chosen, key=lambda j: j.duration_min):
+        if j.signature not in seen:
+            seen.add(j.signature)
+            out.append(j)
+    return out, True
+
+
 def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: datetime,
                      depart_at: datetime | None = None, preference: str | None = None,
                      feed_fresh: bool = True) -> CommuteEvaluation:
@@ -419,6 +494,7 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
         journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
     except Exception:
         journeys = []
+    journeys, chosen_stops_honoured = apply_chosen_stops(provider, commute, depart_at, journeys)
     if depart_at - now <= timedelta(minutes=LIVE_HORIZON_MIN):
         ctx.prefetch({l.from_stop_id for j in journeys for l in j.transit_legs if l.from_stop_id})
     forecasts = [forecast_journey(j, ctx, depart_at) for j in journeys]
@@ -488,7 +564,7 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
             status = "normal"
             detail += f" The {recommended.journey.summary} is {_fmt_min(gain)} quicker today."
     return CommuteEvaluation(commute, depart_at, baseline, usual, ranked, recommended, status, delta, gain,
-                             headline, detail, preference)
+                             headline, detail, preference, chosen_stops_honoured)
 
 
 def set_usual(commute: Commute, j: Journey) -> None:

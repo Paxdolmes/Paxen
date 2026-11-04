@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from ..domain import FetchResult, Journey, PlaceResult
+from ..domain import FetchResult, Journey, NearbyStop, PlaceResult
 
 
 class Provider(Protocol):
@@ -18,3 +18,5 @@ class Provider(Protocol):
     ) -> list[Journey]: ...
 
     def search_places(self, query: str) -> list[PlaceResult]: ...
+
+    def nearby_stops(self, lat: float, lon: float) -> list[NearbyStop]: ...

@@ -95,3 +95,19 @@ def test_seed_backfills_history(client):
     d = client.get("/v1/dashboard").json()
     assert d["commutes"][0]["baseline"]["basis"] == "personal"
     assert client.get("/v1/insights").json()["model"]["status"] == "active"
+
+
+def test_onboarding_with_chosen_stations(client):
+    near = client.get("/v1/places/nearby-stops", params={"lat": HOME[0], "lon": HOME[1]}).json()
+    station = next(n for n in near if n["stop_id"] == "walthamstow-central")
+    assert station["walk_min"] > 0 and station["kind"] == "station"
+    home = {"label": "home", "name": "12 Orford Road", "lat": HOME[0], "lon": HOME[1],
+            "stops": [{k: station[k] for k in ("stop_id", "name", "kind", "lat", "lon", "walk_min", "modes", "lines")}]}
+    r = client.post("/v1/onboarding", json={"home": home,
+                                            "work": {"label": "work", "name": "Regent Street", "lat": WORK[0],
+                                                     "lon": WORK[1]}})
+    assert r.status_code == 201, r.text
+    assert r.json()["places"][0]["stops"][0]["stop_id"] == "walthamstow-central"
+    card = client.get("/v1/dashboard").json()["commutes"][0]
+    assert card["chosen_stops_honoured"]
+    assert all(o["legs"][1]["from"] == "Walthamstow Central" for o in card["options"])

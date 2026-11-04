@@ -51,6 +51,8 @@ class Place(Base):
     lon: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | pin | saved | inferred
     confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Stations/stops the user chose for this place: [{stop_id, name, kind, lat, lon, walk_min, hub, modes, lines}]
+    preferred_stops: Mapped[list | None] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     user = relationship("User", back_populates="places")
 
@@ -213,7 +215,8 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 # Additive column changes for databases created by earlier versions (no migration framework yet).
 _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
-                  ("raw_snapshots", "archive_key", "VARCHAR(300)")]
+                  ("raw_snapshots", "archive_key", "VARCHAR(300)"),
+                  ("places", "preferred_stops", "JSON")]
 
 
 def init_db(eng=None) -> None:

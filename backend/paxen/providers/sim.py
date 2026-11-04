@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..domain import (
     GOOD, MINOR, PART_SUSPENDED, SEVERE, SUSPENDED,
-    Arrival, FetchResult, Journey, Leg, LineStatus, PlaceResult,
+    Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult,
 )
 from ..timeutil import local
 
@@ -404,6 +404,19 @@ class SimProvider:
                 ))
                 t = dep + timedelta(minutes=ride)
         return Journey(legs, round((t - depart_at).total_seconds() / 60, 1), depart_at, t, source="sim")
+
+    def nearby_stops(self, lat: float, lon: float) -> list[NearbyStop]:
+        bus_stops = {sid for line in LINES.values() if line.mode == "bus" for sid in line.stops}
+        out = []
+        for sid, (name, slat, slon) in STATIONS.items():
+            d = haversine_m((lat, lon), (slat, slon))
+            kind = "bus" if sid in bus_stops else "station"
+            if d <= (400 if kind == "bus" else 1500):
+                lines = [l for l in LINES.values() if sid in l.stops]
+                out.append(NearbyStop(sid, name, kind, slat, slon, int(round(d)), walk_min((lat, lon), (slat, slon)),
+                                      sorted({l.mode for l in lines}), [l.name for l in lines]))
+        out.sort(key=lambda x: x.distance_m)
+        return out
 
     # ---- places ---------------------------------------------------------------------
     def search_places(self, query: str) -> list[PlaceResult]:

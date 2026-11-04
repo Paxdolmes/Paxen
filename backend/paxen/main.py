@@ -93,12 +93,26 @@ def _round(x: float) -> float:
     return round(x, 4)  # ~11 m: enough for routing, less precise than a front door
 
 
+class StopIn(BaseModel):
+    stop_id: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=120)
+    kind: Literal["station", "bus"] = "station"
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    walk_min: float | None = Field(default=None, ge=0, le=90)
+    hub: str | None = None
+    modes: list[str] = []
+    lines: list[str] = []
+    indicator: str | None = None
+
+
 class PlaceIn(BaseModel):
     label: Literal["home", "work", "other"] = "other"
     name: str = Field(min_length=1, max_length=120)
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     source: Literal["manual", "pin", "saved", "inferred"] = "manual"
+    stops: list[StopIn] = Field(default=[], max_length=6)
 
 
 class PlacePatch(BaseModel):
@@ -107,6 +121,7 @@ class PlacePatch(BaseModel):
     lat: float | None = None
     lon: float | None = None
     confirmed: bool | None = None
+    stops: list[StopIn] | None = Field(default=None, max_length=6)
 
 
 class CommuteIn(BaseModel):
@@ -259,12 +274,14 @@ def onboarding(body: OnboardingIn, u: User = Depends(current_user), s: Session =
     places = {}
     for key, p in (("home", body.home), ("work", body.work)):
         existing = s.scalar(select(Place).where(Place.user_id == u.id, Place.label == key))
+        stops = [st.model_dump() for st in p.stops]
         if existing:
             existing.name, existing.lat, existing.lon, existing.source = p.name, _round(p.lat), _round(p.lon), p.source
+            existing.preferred_stops = stops
             places[key] = existing
         else:
             places[key] = Place(user_id=u.id, label=key, name=p.name, lat=_round(p.lat), lon=_round(p.lon),
-                                source=p.source, confirmed=True)
+                                source=p.source, confirmed=True, preferred_stops=stops)
             s.add(places[key])
     s.flush()
     for c in s.scalars(select(Commute).where(Commute.user_id == u.id)):
@@ -286,11 +303,27 @@ def onboarding(body: OnboardingIn, u: User = Depends(current_user), s: Session =
 # ------------------------------------------------------------------------- places
 @app.get("/v1/places/search")
 def search_places(q: str = Query(min_length=2, max_length=80), _: User = Depends(current_user)):
+    """Addresses and postcodes (geocoded) first, then matching stations/stops."""
+    from .geocode import geocode
+
+    addresses = list(geocode(q)) if not isinstance(get_provider(), SimProvider) else []
     try:
-        res = get_provider().search_places(q)
+        stations = get_provider().search_places(q)
     except Exception as e:
-        raise HTTPException(502, f"Place search unavailable: {e}") from e
-    return [r.__dict__ for r in res]
+        if not addresses:
+            raise HTTPException(502, f"Place search unavailable: {e}") from e
+        stations = []
+    return [r.__dict__ for r in addresses[:6] + stations[:8]]
+
+
+@app.get("/v1/places/nearby-stops")
+def nearby_stops(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                 _: User = Depends(current_user)):
+    """Stations (~1.2 km) and bus/tram stops (~400 m) near a point, nearest first, for the user to choose from."""
+    try:
+        return [n.__dict__ for n in get_provider().nearby_stops(lat, lon)]
+    except Exception as e:
+        raise HTTPException(502, f"Nearby stops unavailable: {e}") from e
 
 
 @app.get("/v1/places")
@@ -301,7 +334,8 @@ def list_places(u: User = Depends(current_user), s: Session = Depends(db)):
 @app.post("/v1/places", status_code=201)
 def create_place(body: PlaceIn, u: User = Depends(current_user), s: Session = Depends(db)):
     p = Place(user_id=u.id, label=body.label, name=body.name, lat=_round(body.lat), lon=_round(body.lon),
-              source=body.source, confirmed=body.source != "inferred")  # inferred places need explicit confirmation
+              source=body.source, confirmed=body.source != "inferred",  # inferred places need explicit confirmation
+              preferred_stops=[st.model_dump() for st in body.stops])
     s.add(p)
     s.commit()
     return ser.place(p)
@@ -311,8 +345,11 @@ def create_place(body: PlaceIn, u: User = Depends(current_user), s: Session = De
 def patch_place(place_id: str, body: PlacePatch, u: User = Depends(current_user), s: Session = Depends(db)):
     p = _own(s, Place, place_id, u)
     for k, v in body.model_dump(exclude_unset=True).items():
+        if k == "stops":
+            p.preferred_stops = v or []
+            continue
         setattr(p, k, _round(v) if k in ("lat", "lon") and v is not None else v)
-    if body.lat is not None or body.lon is not None:  # moved: the usual route must be re-learned
+    if body.lat is not None or body.lon is not None or body.stops is not None:  # usual route must be re-learned
         for c in s.scalars(select(Commute).where((Commute.origin_id == p.id) | (Commute.dest_id == p.id))):
             c.usual_signature = c.usual_summary = c.usual_nominal_min = None
     s.commit()
@@ -379,15 +416,17 @@ def _warm_journeys(commutes: list[Commute], t: datetime) -> None:
     if len(commutes) < 2:
         return
     p = get_provider()
+    # Read everything from the database here: the session is not thread-safe, so worker threads only get plain values.
+    jobs = [((c.origin.lat, c.origin.lon), (c.dest.lat, c.dest.lon), default_depart_at(c, t)) for c in commutes]
 
-    def plan(c: Commute):
+    def plan(job):
         try:
-            p.journeys((c.origin.lat, c.origin.lon), (c.dest.lat, c.dest.lon), default_depart_at(c, t))
+            p.journeys(*job)
         except Exception:
             pass  # evaluation will retry and report unavailability properly
 
-    with ThreadPoolExecutor(max_workers=len(commutes)) as pool:
-        list(pool.map(plan, commutes))
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        list(pool.map(plan, jobs))
 
 
 def _eval_dict(s, c, t, depart_at=None, preference=None, max_options=None):

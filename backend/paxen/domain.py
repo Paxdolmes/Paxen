@@ -137,3 +137,20 @@ class FetchResult:
     endpoint: str = ""
     status: int = 200
     latency_ms: int = 0
+
+
+@dataclass
+class NearbyStop:
+    """A station or stop near a place, offered so the user can pick the ones they actually use."""
+    stop_id: str
+    name: str
+    kind: str  # "station" | "bus"
+    lat: float
+    lon: float
+    distance_m: int
+    walk_min: float
+    modes: list[str] = field(default_factory=list)
+    lines: list[str] = field(default_factory=list)
+    hub: str | None = None  # interchange group, e.g. HUBVIC for the Tube and rail stations at Victoria
+    indicator: str | None = None  # bus stop letter, e.g. "Stop K"
+    towards: str | None = None
