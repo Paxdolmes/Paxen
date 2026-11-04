@@ -46,28 +46,47 @@ class Sample:
     quality: float = 1.0
 
 
-def load_samples(s: Session, source: str, since: datetime | None = None, min_quality: float = 0.3) -> list[Sample]:
+def load_samples(s: Session, source: str, since: datetime | None = None, min_quality: float = 0.3,
+                 methods: tuple[str, ...] | None = None) -> list[Sample]:
+    """Pair each recorded prediction with the arrival it was predicting.
+
+    Matching uses the vehicle id plus direction: for measured (Trackernet) arrivals the platform's bound
+    ("southbound"), otherwise the destination. If both a measured and an inferred arrival match, the measured one
+    wins. `methods` restricts which kinds of ground truth are used (e.g. only "trackernet").
+    """
+    from .trackernet import bound_of
+
     q = (
-        select(Prediction.polled_at, Prediction.line_id, Prediction.stop_id, Prediction.tts_s,
-               Prediction.expected_arrival, Prediction.line_category, ObservedArrival.arrived_at,
-               ObservedArrival.quality)
+        select(Prediction.id, Prediction.polled_at, Prediction.line_id, Prediction.stop_id, Prediction.tts_s,
+               Prediction.expected_arrival, Prediction.line_category, Prediction.direction, Prediction.platform,
+               ObservedArrival.arrived_at, ObservedArrival.quality, ObservedArrival.method, ObservedArrival.direction)
         .join(ObservedArrival, (ObservedArrival.source == Prediction.source)
               & (ObservedArrival.stop_id == Prediction.stop_id)
               & (ObservedArrival.line_id == Prediction.line_id)
-              & (ObservedArrival.vehicle_id == Prediction.vehicle_id)
-              & ((ObservedArrival.direction == Prediction.direction)
-                 | (ObservedArrival.direction.is_(None) & Prediction.direction.is_(None))))
+              & (ObservedArrival.vehicle_id == Prediction.vehicle_id))
         .where(Prediction.source == source, ObservedArrival.quality >= min_quality,
                Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S)
     )
     if since:
         q = q.where(Prediction.polled_at >= since)
-    out = []
-    for polled, line, stop, tts, exp, cat, arrived, quality in s.execute(q):
+    if methods:
+        q = q.where(ObservedArrival.method.in_(methods))
+    best: dict[int, tuple] = {}
+    for pid, polled, line, stop, tts, exp, cat, p_dir, platform, arrived, quality, method, o_dir in s.execute(q):
+        if method == "trackernet":
+            b = bound_of(platform)
+            if b and o_dir and b != o_dir:
+                continue  # same train, other direction (e.g. after reversing at a terminus)
+        elif not (p_dir == o_dir or (p_dir is None and o_dir is None)):
+            continue
         err = (arrived - exp).total_seconds()
         if abs(err) > 1800 or (arrived - polled).total_seconds() > MAX_LEAD_S + 900:
-            continue  # vehicle id reused by a later trip — not the same journey
-        out.append(Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good", err, quality))
+            continue  # vehicle id reused by a later trip: not the same journey
+        rank = (1 if method == "trackernet" else 0, quality, -abs(err))
+        if pid not in best or rank > best[pid][0]:
+            best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",
+                                      err, quality))
+    out = [v[1] for v in best.values()]
     out.sort(key=lambda x: x.polled_at)
     return out
 

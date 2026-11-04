@@ -23,11 +23,25 @@ PILOT_STOPS_SIM = ["walthamstow-central", "liverpool-street", "oxford-circus", "
                    "hoe-street", "bakers-arms"]
 
 
+def _init_trackernet():
+    from .trackernet import from_env
+
+    return from_env()
+
+
+_TRACKERNET = _init_trackernet()
+
+
 def recorder_tick() -> dict:
     provider = get_provider()
     with SessionLocal() as s:
         extra = PILOT_STOPS_SIM if isinstance(provider, SimProvider) else []
-        return record_once(s, provider, utcnow(), extra, modes=settings.record_modes)
+        out = record_once(s, provider, utcnow(), extra, modes=settings.record_modes)
+        if _TRACKERNET is not None and settings.provider == "tfl":
+            from .recorder import record_trackernet
+
+            out["trackernet"] = record_trackernet(s, _TRACKERNET, utcnow())
+        return out
 
 
 def archive_tick() -> list[dict]:

@@ -149,6 +149,7 @@ class Prediction(Base):
     expected_arrival: Mapped[datetime] = mapped_column(DateTime)
     tts_s: Mapped[int] = mapped_column(Integer)
     line_category: Mapped[str] = mapped_column(String(20), default="good")
+    platform: Mapped[str | None] = mapped_column(String(60))  # e.g. "Southbound - Platform 1"
     __table_args__ = (
         Index("ix_pred_vehicle", "source", "stop_id", "line_id", "vehicle_id", "polled_at"),
         Index("ix_pred_polled", "polled_at"),
@@ -231,7 +232,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("raw_snapshots", "archive_key", "VARCHAR(300)"),
                   ("places", "preferred_stops", "JSON"),
                   ("trips", "plan", "JSON"),
-                  ("trips", "status", "VARCHAR(20)")]
+                  ("trips", "status", "VARCHAR(20)"),
+                  ("predictions", "platform", "VARCHAR(60)")]
 
 
 def init_db(eng=None) -> None:

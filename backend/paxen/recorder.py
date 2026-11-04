@@ -82,7 +82,7 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
             source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
             stop_id=stop_id, line_id=a.line_id, mode=a.mode, direction=a.direction, vehicle_id=a.vehicle_id,
             expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
-            line_category=cats.get(a.line_id, GOOD),
+            line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
         ) for a in res.items])
     return len(res.items)
 
@@ -152,7 +152,7 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
         source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
         stop_id=a.stop_id, line_id=a.line_id, mode=a.mode or mode, direction=a.direction, vehicle_id=a.vehicle_id,
         expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
-        line_category=cats.get(a.line_id, GOOD),
+        line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
     ) for a in res.items
         if a.time_to_station_s <= NETWORK_MAX_LEAD_S
         and sampler.keep((a.stop_id, a.line_id, a.vehicle_id, a.direction), a.time_to_station_s, now)]
@@ -278,6 +278,52 @@ def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta =
         quality = round(max(0.0, 1 - gap / 300) * (1 - tts / (ARRIVAL_COUNTDOWN_MAX_S * 2)), 3)
         record(key, est, polled, missing_at, quality)
     return created
+
+
+def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archive=None) -> dict:
+    """Measured Tube arrivals: every train first seen 'At Platform', timed by the signalling system."""
+    import json
+    import xml.etree.ElementTree as ET
+
+    from .trackernet import LINE_CODES, bound_of
+
+    since = naive_utc(now - DEDUPE_WINDOW * 3)
+    existing: dict[tuple, list[datetime]] = defaultdict(list)
+    for o in s.scalars(select(ObservedArrival).where(ObservedArrival.source == source,
+                                                     ObservedArrival.method == "trackernet",
+                                                     ObservedArrival.arrived_at >= since)):
+        existing[(o.stop_id, o.line_id, o.vehicle_id, o.direction)].append(o.arrived_at)
+    raws, created, unmapped, failed = {}, 0, 0, []
+    for code, line_ids in LINE_CODES.items():
+        try:
+            _, trains, raw = tn.summary(code)
+            raws[code] = raw.decode("utf-8", "replace")
+            names = {st.get("Code"): st.get("N") for st in ET.fromstring(raw).findall("S")}
+            stations = tn.station_map(code, names)
+        except Exception as e:
+            failed.append(code)
+            log.warning("trackernet %s failed: %s", code, e)
+            continue
+        for t in trains:
+            naptan = stations.get(t.station_code)
+            if not naptan:
+                unmapped += 1
+                continue
+            arrived = naive_utc(t.seen_since)
+            for line_id in line_ids:
+                key = (naptan, line_id, t.set_no, bound_of(t.platform))
+                if any(abs((arrived - x).total_seconds()) < DEDUPE_WINDOW.total_seconds() for x in existing[key]):
+                    continue
+                existing[key].append(arrived)
+                s.add(ObservedArrival(source=source, stop_id=naptan, line_id=line_id, vehicle_id=t.set_no,
+                                      direction=key[3], arrived_at=arrived,
+                                      earliest=arrived - timedelta(seconds=15), latest=arrived + timedelta(seconds=15),
+                                      method="trackernet", quality=1.0))
+                created += 1
+    if raws:  # one archive object per cycle for all lines (keeps storage requests low)
+        archive_raw(source, "trackernet", now, json.dumps(raws), archive)
+    s.commit()
+    return {"measured_arrivals": created, "unmapped": unmapped, "failed_lines": failed}
 
 
 def record_once(s: Session, provider: Provider, now: datetime, extra_stops: list[str] | None = None,
