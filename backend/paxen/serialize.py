@@ -29,8 +29,9 @@ def user(u: User) -> dict:
             "min_gain_min": u.min_gain_min, "push_enabled": bool(u.push_token)}
 
 
-def option(f: JourneyForecast, ev: CommuteEvaluation) -> dict:
+def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) -> dict:
     j = f.journey
+    leg_paths = [l.path for l in j.legs]
     at = lambda m: iso(f.depart_at + timedelta(minutes=m))  # noqa: E731
     is_usual = ev.usual is f
     return {
@@ -44,6 +45,8 @@ def option(f: JourneyForecast, ev: CommuteEvaluation) -> dict:
         "arrive_range": [at(f.p10), at(f.p90)],
         "duration": {"p10": f.p10, "p50": f.p50, "p90": f.p90},
         "nominal_min": j.duration_min,
+        "fare": ({"pence": j.fare_pence, "peak_pence": j.fare_peak_pence, "off_peak_pence": j.fare_off_peak_pence}
+                 if j.fare_pence is not None else None),
         "vs_usual_min": round(f.p50 - ev.usual.p50, 1) if ev.usual and ev.usual.feasible and not is_usual else None,
         "walking_min": j.walking_min,
         "changes": j.changes,
@@ -59,11 +62,12 @@ def option(f: JourneyForecast, ev: CommuteEvaluation) -> dict:
             "to": ev.commute.dest.name if l.to_name == "Destination" else l.to_name,
             "direction": l.direction, "wait_min": l.wait_min, "ride_min": l.ride_min, "live": l.live,
             "status": l.category, "next_departures_min": l.next_departures_min,
-        } for l in f.legs],
+            "path": [list(pt) for pt in leg_paths[i]] if with_paths else None,
+        } for i, l in enumerate(f.legs)],
     }
 
 
-def evaluation(ev: CommuteEvaluation, now, max_options: int | None = None) -> dict:
+def evaluation(ev: CommuteEvaluation, now, max_options: int | None = None, with_paths: bool = False) -> dict:
     opts = ev.options if max_options is None else ev.options[:max_options]
     if ev.usual and ev.usual not in opts:
         opts = opts + [ev.usual]
@@ -78,10 +82,11 @@ def evaluation(ev: CommuteEvaluation, now, max_options: int | None = None) -> di
         "gain_min": ev.gain_min,
         "preference": ev.preference,
         "chosen_stops_honoured": ev.chosen_stops_honoured,
+        "conditions": ev.conditions,
         "baseline": ev.baseline,
-        "usual": option(ev.usual, ev) if ev.usual else None,
-        "recommended": option(ev.recommended, ev) if ev.recommended else None,
-        "options": [option(f, ev) for f in opts],
+        "usual": option(ev.usual, ev, with_paths) if ev.usual else None,
+        "recommended": option(ev.recommended, ev, with_paths) if ev.recommended else None,
+        "options": [option(f, ev, with_paths) for f in opts],
     }
 
 
@@ -98,4 +103,5 @@ def trip(t: Trip) -> dict:
             "route_key": route_key(t.signature), "started_at": iso(t.started_at), "arrived_at": iso(t.arrived_at),
             "duration_min": t.duration_min, "forecast": {"p10": t.forecast_p10, "p50": t.forecast_p50,
                                                          "p90": t.forecast_p90},
-            "followed_alert_id": t.followed_alert_id, "source": t.source}
+            "followed_alert_id": t.followed_alert_id, "source": t.source, "status": t.status,
+            "has_plan": bool(t.plan)}

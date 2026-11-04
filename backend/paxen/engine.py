@@ -349,9 +349,10 @@ def score(f: JourneyForecast, preference: str) -> float:
     }.get(preference, f.p50 + 0.5 * spread + 1.5 * ch + 0.2 * walk)
 
 
-def rank(forecasts: list[JourneyForecast], preference: str) -> list[JourneyForecast]:
+def rank(forecasts: list[JourneyForecast], preference: str, walk_penalty: float = 0.0) -> list[JourneyForecast]:
+    """walk_penalty: extra cost per walking minute (rain, poor air), so long walks rank lower on bad days."""
     for f in forecasts:
-        f.score = score(f, preference)
+        f.score = score(f, preference) + walk_penalty * f.journey.walking_min
     return sorted(forecasts, key=lambda f: (f.score, f.p50))
 
 
@@ -387,6 +388,7 @@ class CommuteEvaluation:
     detail: str
     preference: str
     chosen_stops_honoured: bool = True
+    conditions: dict | None = None
 
 
 def _fmt_min(x: float) -> str:
@@ -484,7 +486,8 @@ def apply_chosen_stops(provider: Provider, commute: Commute, depart_at: datetime
 
 def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: datetime,
                      depart_at: datetime | None = None, preference: str | None = None,
-                     feed_fresh: bool = True) -> CommuteEvaluation:
+                     feed_fresh: bool = True, conditions: dict | None = None) -> CommuteEvaluation:
+    """conditions: optional {"weather": ..., "air_quality": ...} from paxen.conditions; affects ranking only."""
     preference = preference or commute.preference or "balanced"
     depart_at = depart_at or default_depart_at(commute, now)
     statuses = current_statuses(provider, now)
@@ -516,7 +519,12 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     for f in forecasts:
         f.reliability = historical_reliability(s, commute, f.signature, baseline["p50"])
 
-    ranked = rank(forecasts, preference)
+    from .conditions import walking_penalty
+
+    conditions = dict(conditions or {})
+    walk_k, why = walking_penalty(conditions.get("weather"), conditions.get("air_quality"))
+    conditions["walking_note"] = (f"Routes with long walks ranked lower: {' and '.join(why)}." if why else None)
+    ranked = rank(forecasts, preference, walk_k)
     feasible = [f for f in ranked if f.feasible]
     base = baseline["p50"]
     delta = round(usual.p50 - base, 1) if usual and usual.feasible and base else None
@@ -564,7 +572,7 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
             status = "normal"
             detail += f" The {recommended.journey.summary} is {_fmt_min(gain)} quicker today."
     return CommuteEvaluation(commute, depart_at, baseline, usual, ranked, recommended, status, delta, gain,
-                             headline, detail, preference, chosen_stops_honoured)
+                             headline, detail, preference, chosen_stops_honoured, conditions)
 
 
 def set_usual(commute: Commute, j: Journey) -> None:

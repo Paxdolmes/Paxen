@@ -13,13 +13,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import json
 import logging
 
 import httpx
 
 from ..domain import (
     GOOD, MINOR, PART_SUSPENDED, SEVERE, SEVERITY_ORDER, SUSPENDED,
-    Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult, StatusSection,
+    Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult, StatusSection, simplify_path,
 )
 from ..timeutil import LONDON
 
@@ -102,6 +103,36 @@ def _cache_buster() -> str:
     """TfL sits behind a shared cache (varnish, s-maxage=60). From some hosting regions it served stale,
     partial network-wide responses; a unique query parameter forces a fresh response (TfL ignores it)."""
     return str(time.time_ns())
+
+
+def parse_future_statuses(payload: list[dict]) -> list[dict]:
+    out = []
+    for line in payload or []:
+        for st in line.get("lineStatuses") or []:
+            cat = _SEVERITY.get(st.get("statusSeverity", 10), MINOR)
+            if cat == GOOD:
+                continue
+            for vp in st.get("validityPeriods") or [{}]:
+                out.append({"line_id": line["id"], "line_name": line.get("name", line["id"]), "category": cat,
+                            "description": st.get("statusSeverityDescription", ""), "reason": st.get("reason"),
+                            "from": vp.get("fromDate"), "to": vp.get("toDate")})
+    return out
+
+
+AQ_BANDS = ["Low", "Moderate", "High", "Very High"]
+
+
+def parse_air_quality(payload: dict) -> dict | None:
+    """TfL's London air-quality forecast. (Its fromDate/toDate fields are unreliable, so only band + text are used.)"""
+    fc = {f.get("forecastType"): f for f in (payload or {}).get("currentForecast") or []}
+    cur = fc.get("Current")
+    if not cur or not cur.get("forecastBand"):
+        return None
+    band = cur["forecastBand"].strip().title()
+    nxt = fc.get("Future") or {}
+    return {"band": band, "summary": (cur.get("forecastSummary") or "").strip(),
+            "tomorrow_band": (nxt.get("forecastBand") or "").strip().title() or None,
+            "level": AQ_BANDS.index(band) if band in AQ_BANDS else None}
 
 
 def _walk_min(distance_m: float) -> float:
@@ -203,12 +234,26 @@ def parse_journeys(payload: dict) -> list[Journey]:
                 direction=directions[0] if directions else None,
                 stops=len(path_points) or None,
                 stop_ids=([first] if first else []) + path_ids,
+                path=_line_string((l.get("path") or {}).get("lineString")),
             ))
         if not legs:
             continue
+        fare = j.get("fare") or {}
+        fares = fare.get("fares") or [{}]
         out.append(Journey(legs, float(j.get("duration", 0)), _dt(j.get("startDateTime")),
-                           _dt(j.get("arrivalDateTime")), source="tfl"))
+                           _dt(j.get("arrivalDateTime")), source="tfl",
+                           fare_pence=fare.get("totalCost"), fare_peak_pence=fares[0].get("peak"),
+                           fare_off_peak_pence=fares[0].get("offPeak")))
     return out
+
+
+def _line_string(raw: str | None) -> list[tuple[float, float]]:
+    if not raw:
+        return []
+    try:
+        return simplify_path([(float(a), float(b)) for a, b in json.loads(raw)])
+    except (ValueError, TypeError):
+        return []
 
 
 def dedupe_journeys(journeys: list[Journey]) -> list[Journey]:
@@ -355,6 +400,19 @@ class TflProvider:
     def search_places(self, query: str) -> list[PlaceResult]:
         data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 15})
         return parse_place_search(data)
+
+    def future_statuses(self, line_ids: list[str], start: datetime, end: datetime) -> list[dict]:
+        """Planned disruption (engineering works, closures) on these lines between start and end."""
+        if not line_ids:
+            return []
+        f = "%Y-%m-%dT%H:%M:%S"
+        data, *_ = self._get(f"/Line/{','.join(sorted(set(line_ids)))}/Status/{start.strftime(f)}/to/{end.strftime(f)}",
+                             {"detail": "true"})
+        return parse_future_statuses(data)
+
+    def air_quality(self) -> dict | None:
+        data, *_ = self._get("/AirQuality")
+        return parse_air_quality(data)
 
     def nearby_stops(self, lat: float, lon: float) -> list[NearbyStop]:
         """Stations within ~1.2 km and the closest bus/tram stops within ~400 m, nearest first."""

@@ -389,7 +389,12 @@ class SimProvider:
                     prev = legs.pop()
                     w += prev.duration_min
                     from_name, t = prev.from_name, prev.departure
-                legs.append(Leg("walking", round(w, 1), from_name, to_name, t, t + timedelta(minutes=w)))
+                a_pos = origin if a == "__origin__" else (STATIONS[a][1], STATIONS[a][2])
+                b_pos = dest if b == "__dest__" else (STATIONS[b][1], STATIONS[b][2])
+                path = [a_pos, b_pos]
+                if legs and legs[-1].mode == "walking" and legs[-1].path:
+                    path = legs[-1].path[:1] + [b_pos]
+                legs.append(Leg("walking", round(w, 1), from_name, to_name, t, t + timedelta(minutes=w), path=path))
                 t = t + timedelta(minutes=w)
             else:
                 _, a, line_id, b, ride, wait = e
@@ -401,6 +406,9 @@ class SimProvider:
                     line.mode, round(ride, 1), STATIONS[a][0], STATIONS[b][0], dep, dep + timedelta(minutes=ride),
                     line_id=line.id, line_name=line.name, from_stop_id=a, to_stop_id=b,
                     direction=STATIONS[terminus][0], headway_min=line.headway_min, stops=abs(j - i),
+                    stop_ids=[line.stops[k] for k in (range(i, j + 1) if j > i else range(i, j - 1, -1))],
+                    path=[(STATIONS[line.stops[k]][1], STATIONS[line.stops[k]][2])
+                          for k in (range(i, j + 1) if j > i else range(i, j - 1, -1))],
                 ))
                 t = dep + timedelta(minutes=ride)
         return Journey(legs, round((t - depart_at).total_seconds() / 60, 1), depart_at, t, source="sim")

@@ -94,6 +94,9 @@ class Trip(Base):
     forecast_p90: Mapped[float | None] = mapped_column(Float)
     followed_alert_id: Mapped[str | None] = mapped_column(String(32))
     source: Mapped[str] = mapped_column(String(20), default="app")  # app | manual | detected
+    # Live trips: the route as chosen (legs, stops, shape) and how the trip ended. Positions are never stored.
+    plan: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str | None] = mapped_column(String(20))  # active | arrived | auto_closed
 
 
 class Alert(Base):
@@ -192,6 +195,16 @@ class WatchedStop(Base):
     last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class AirQualityDay(Base):
+    """TfL's London air-quality band, one row per day: the history behind 'today vs usual'."""
+    __tablename__ = "air_quality_days"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-MM-DD (London)
+    band: Mapped[str] = mapped_column(String(20))
+    level: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[str | None] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class ModelVersion(Base):
     __tablename__ = "model_versions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -216,7 +229,9 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 # Additive column changes for databases created by earlier versions (no migration framework yet).
 _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("raw_snapshots", "archive_key", "VARCHAR(300)"),
-                  ("places", "preferred_stops", "JSON")]
+                  ("places", "preferred_stops", "JSON"),
+                  ("trips", "plan", "JSON"),
+                  ("trips", "status", "VARCHAR(20)")]
 
 
 def init_db(eng=None) -> None:

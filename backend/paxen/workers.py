@@ -47,13 +47,32 @@ def archive_tick() -> list[dict]:
         return [archive_network(s, provider, m, utcnow()) for m in settings.archive_only_modes]
 
 
+_aq_day: str | None = None
+
+
 def monitor_tick() -> int:
     """Evaluate every commute in its alert window and raise alerts where warranted."""
+    global _aq_day
     provider = get_provider()
     now = utcnow()
     sent = 0
     with SessionLocal() as s:
+        today = now.strftime("%Y-%m-%d %H")[:10]
+        if _aq_day != today and now.hour >= 8:  # TfL publishes the day's forecast in the morning
+            try:
+                from .conditions import record_air_quality
+
+                if record_air_quality(s, provider, now):
+                    _aq_day = today
+            except Exception:
+                log.exception("air quality recording failed")
         fresh = feed_health(s, now)["fresh"]
+        try:
+            from .live import close_stale
+
+            close_stale(s, now)
+        except Exception:
+            log.exception("closing stale trips failed")
         for c in s.scalars(select(Commute).where(Commute.alerts_enabled.is_(True))):
             if c.user.monitoring_paused or not is_active_window(c, now):
                 continue

@@ -81,6 +81,7 @@ class Leg:
     headway_min: float | None = None
     stops: int | None = None
     stop_ids: list[str] = field(default_factory=list)  # every stop the leg calls at, boarding stop first
+    path: list[tuple[float, float]] = field(default_factory=list)  # route shape (lat, lon), simplified for maps
 
     @property
     def is_transit(self) -> bool:
@@ -94,6 +95,9 @@ class Journey:
     departure: datetime
     arrival: datetime
     source: str = "sim"
+    fare_pence: int | None = None  # the fare TfL quotes for this time of travel
+    fare_peak_pence: int | None = None
+    fare_off_peak_pence: int | None = None
 
     @property
     def transit_legs(self) -> list[Leg]:
@@ -154,3 +158,11 @@ class NearbyStop:
     hub: str | None = None  # interchange group, e.g. HUBVIC for the Tube and rail stations at Victoria
     indicator: str | None = None  # bus stop letter, e.g. "Stop K"
     towards: str | None = None
+
+
+def simplify_path(points: list[tuple[float, float]], max_points: int = 60) -> list[tuple[float, float]]:
+    """Keep first, last and evenly spaced points: enough to draw a route, small enough to send to phones."""
+    if len(points) <= max_points:
+        return [(round(a, 5), round(b, 5)) for a, b in points]
+    step = (len(points) - 1) / (max_points - 1)
+    return [(round(points[round(i * step)][0], 5), round(points[round(i * step)][1], 5)) for i in range(max_points)]

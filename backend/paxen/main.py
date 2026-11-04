@@ -429,18 +429,43 @@ def _warm_journeys(commutes: list[Commute], t: datetime) -> None:
         list(pool.map(plan, jobs))
 
 
-def _eval_dict(s, c, t, depart_at=None, preference=None, max_options=None):
+def _conditions(s, c, t, depart_at=None) -> dict:
+    """Rain at the start of the journey and London air quality. Cached; missing sources are simply omitted."""
+    from .conditions import air_quality, weather_at
+
+    when = depart_at or default_depart_at(c, t)
+    return {"weather": weather_at(c.origin.lat, c.origin.lon, when) if not isinstance(get_provider(), SimProvider)
+            else None,
+            "air_quality": air_quality(s, get_provider(), t)}
+
+
+def _eval_dict(s, c, t, depart_at=None, preference=None, max_options=None, with_paths=False):
     ev = evaluate_commute(s, get_provider(), c, t, depart_at=depart_at, preference=preference,
-                          feed_fresh=_feed_fresh(s, t))
+                          feed_fresh=_feed_fresh(s, t), conditions=_conditions(s, c, t, depart_at))
     s.commit()  # persists learned usual route + watched stops
-    return ser.evaluation(ev, t, max_options)
+    return ser.evaluation(ev, t, max_options, with_paths)
+
+
+def _upcoming(evals: list[dict], t: datetime) -> list[dict]:
+    """Planned closures in the next week on lines the user's usual and recommended routes use."""
+    from .conditions import upcoming_disruptions
+
+    lines: dict[str, set[str]] = {}
+    for e in evals:
+        for key in ("usual", "recommended"):
+            o = e.get(key)
+            for leg in (o or {}).get("legs", []):
+                if leg.get("line_id"):
+                    lines.setdefault(leg["line_id"], set()).add(e["commute"]["name"])
+    items = upcoming_disruptions(get_provider(), list(lines), t)
+    return [{**i, "commutes": sorted(lines.get(i["line_id"], []))} for i in items]
 
 
 @app.get("/v1/commutes/{commute_id}/compare")
 def compare(commute_id: str, preference: Pref | None = None, depart_at: datetime | None = None,
             u: User = Depends(current_user), s: Session = Depends(db)):
     c = _own(s, Commute, commute_id, u)
-    return _eval_dict(s, c, now(), aware(depart_at) if depart_at else None, preference)
+    return _eval_dict(s, c, now(), aware(depart_at) if depart_at else None, preference, with_paths=True)
 
 
 @app.get("/v1/dashboard")
@@ -460,6 +485,7 @@ def dashboard(u: User = Depends(current_user), s: Session = Depends(db)):
         "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t, p.name),
         "active_commute_id": active["commute"]["id"] if active else None,
         "commutes": evals, "network": _network(t, evals), "unread_alerts": unread,
+        "upcoming": _upcoming(evals, t),
     }
 
 
@@ -510,9 +536,36 @@ def start_trip(body: TripIn, u: User = Depends(current_user), s: Session = Depen
              source="manual" if body.arrived_at else "app")
     if body.arrived_at:
         _finish(t, aware(body.arrived_at))
+    elif body.commute_id and body.signature:
+        # Live trip: remember the chosen route (stops and shape) so progress can be tracked.
+        from .live import plan_from_option
+
+        c = s.get(Commute, body.commute_id)
+        ev = _eval_dict(s, c, started, depart_at=started, with_paths=True)
+        opt = next((o for o in ev["options"] if o["id"] == body.signature), None) or next(
+            (o for o in ev["options"] if route_key(o["id"]) == route_key(body.signature)), None)
+        if opt:
+            t.plan = plan_from_option(opt, {"name": c.origin.name, "lat": c.origin.lat, "lon": c.origin.lon},
+                                      {"name": c.dest.name, "lat": c.dest.lat, "lon": c.dest.lon})
+            t.summary = t.summary or opt["summary"]
+            t.forecast_p10 = t.forecast_p10 or opt["duration"]["p10"]
+            t.forecast_p50 = t.forecast_p50 or opt["duration"]["p50"]
+            t.forecast_p90 = t.forecast_p90 or opt["duration"]["p90"]
+        t.status = "active"
     s.add(t)
     s.commit()
     return ser.trip(t)
+
+
+@app.get("/v1/trips/{trip_id}/live")
+def trip_live(trip_id: str, lat: float | None = Query(None, ge=-90, le=90), lon: float | None = Query(None, ge=-180, le=180),
+              u: User = Depends(current_user), s: Session = Depends(db)):
+    """Progress, time remaining and next departure. lat/lon (optional, from the phone) are used, never stored."""
+    from .live import live_status
+
+    t = _own(s, Trip, trip_id, u)
+    pos = (lat, lon) if lat is not None and lon is not None else None
+    return live_status(s, get_provider(), t, now(), pos)
 
 
 def _finish(t: Trip, arrived: datetime) -> None:
@@ -526,6 +579,7 @@ def _finish(t: Trip, arrived: datetime) -> None:
 def arrive(trip_id: str, body: ArriveIn, u: User = Depends(current_user), s: Session = Depends(db)):
     t = _own(s, Trip, trip_id, u)
     _finish(t, aware(body.arrived_at) if body.arrived_at else now())
+    t.status = "arrived"
     s.commit()
     return ser.trip(t)
 
