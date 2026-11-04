@@ -53,3 +53,47 @@ re-fitted on all days and served.
   reported alongside.
 
 Run it: `python -m paxen.evaluate` (prints the report and, if a candidate is eligible, promotes it).
+
+---
+
+## Amendment 1 (4 November 2026, before any multi-day results; nothing below has been run on recorded data)
+
+Each change is justified by reasoning or synthetic tests, not by scores on recorded data. Every change makes
+the protocol **stricter or more honest**; none relaxes the original rules, which all still apply.
+
+**A1.1 Purge at the split boundary.** A training sample whose *outcome* (the measured or inferred arrival
+time) falls on or after the start of the test day is dropped from training. Without this, a prediction made at
+23:55 for a train arriving at 00:10 teaches the model an outcome from inside the test day, which is standard
+label leakage in time-series validation (purged cross-validation; López de Prado, *Advances in Financial Machine
+Learning*, 2018, ch. 7). The effect is small (the network is quiet around midnight), but it costs nothing and
+removes the leak.
+
+**A1.2 A decision-horizon requirement (added to the eligibility rules).** The headline MAE weights every stored
+prediction equally, so it's dominated by whatever the recorder stores most densely. That's the last two minutes
+before arrival, the horizon that matters least for "should I leave now?". So, in addition to rules 1–3, a
+candidate must also:
+
+> 4. beat `provider` by **at least 3%** on the **decision MAE**: the average, over the lead buckets
+>    **2–5, 5–10 and 10–20 minutes** (equal weight per bucket), of each bucket's MAE, where every train arrival
+>    counts **once** per bucket (its predictions in that bucket are averaged first).
+
+Counting each arrival once also stops one train, observed many times, from dominating, so correlated samples
+don't inflate the result. The 3% margin is the same as rule 1; it isn't tuned.
+
+**A1.3 Calibrated intervals for every challenger (conformalized quantile regression).** Each non-provider
+candidate's p10–p90 interval is recalibrated by split CQR (Romano, Patterson & Candès, *Conformalized Quantile
+Regression*, NeurIPS 2019), per lead bucket ("Mondrian" conformal):
+- Within the training days only, the candidate is fitted on all but the **last** training day; on that last day
+  the conformity score is `max(q10 − y, y − q90)`, and per lead bucket the `⌈(n+1)(0.8)⌉/n` empirical quantile
+  `Q_b` of the scores is taken (falling back to the pooled quantile when a bucket has fewer than 50 scores).
+- The served candidate is then refitted on all training days, and its interval is widened (or narrowed, if
+  `Q_b < 0`) by `Q_b`. Point predictions are unchanged.
+- Rationale: quantile models' raw intervals are often miscalibrated out of sample. CQR gives coverage that's
+  approximately right under exchangeability. Refitting on all days before applying `Q_b` is a common
+  approximation; it's recorded here so it isn't mistaken for the exact guarantee. The provider baseline is not
+  recalibrated (it isn't a candidate for promotion).
+
+**Not adopted (and why):** sample weights by ground-truth quality (the headline already uses measured truth, all
+quality 1.0); upstream-delay and time-since-status-change features (they need a new recorder signal and
+validation; listed for later); extending measured truth to the Overground and Elizabeth line (there's no
+Trackernet equivalent; National Rail's Darwin feed carries actual times for both and is the planned route).
