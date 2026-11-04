@@ -112,3 +112,11 @@ def test_stale_trip_closed_without_learning_from_it(session):
     session.commit()
     assert close_stale(session, MORNING) == 1
     assert t.status == "auto_closed" and t.duration_min is None
+
+
+def test_impossibly_fast_trip_not_learned_from():
+    from paxen.db import Trip
+    from paxen.live import finish
+    t = Trip(user_id="u", started_at=MORNING.replace(tzinfo=None), status="active", plan={"forecast": {"p10": 38}})
+    finish(t, MORNING + timedelta(minutes=2))
+    assert t.status == "too_fast" and t.duration_min is None

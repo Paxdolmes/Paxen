@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { IS_DEMO } from '@/lib/api'
-import { revalidateAll, useDashboard, useToken } from '@/lib/hooks'
+import { revalidateAll, useActiveTrip, useDashboard, useToken } from '@/lib/hooks'
 import { AppHeader, Wordmark } from './app-header'
 import { AlertsScreen } from './screens/alerts-screen'
 import { NetworkScreen } from './screens/network-screen'
@@ -11,6 +11,7 @@ import { RoutesScreen } from './screens/routes-screen'
 import { TodayScreen } from './screens/today-screen'
 import { YouScreen } from './screens/you-screen'
 import { TabBar } from './tab-bar'
+import { LiveTripScreen } from './trip/live-trip-screen'
 import { useNav } from './use-nav'
 
 function Splash() {
@@ -29,6 +30,7 @@ export function PaxenApp() {
   const signedIn = !!token && !onboarding
   const { data: dashboard, error, mutate } = useDashboard(signedIn)
   const mainRef = useRef<HTMLElement>(null)
+  const activeTrip = useActiveTrip()
 
   useEffect(() => {
     window.scrollTo({ top: 0 })
@@ -49,6 +51,9 @@ export function PaxenApp() {
         }}
       />
     )
+
+  if (nav.live && activeTrip)
+    return <LiveTripScreen active={activeTrip} onClose={() => nav.go(nav.tab, { live: null })} />
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col bg-px-canvas">

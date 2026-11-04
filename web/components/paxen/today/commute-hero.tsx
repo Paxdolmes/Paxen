@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowRight, Play, Sparkles } from 'lucide-react'
-import { fmtDelta, fmtMin, fmtTime } from '@/lib/format'
+import { fmtDelta, fmtMin, fmtTime, fareLabel } from '@/lib/format'
 import { useActiveTrip } from '@/lib/hooks'
 import type { CommuteEvaluation } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -15,7 +15,7 @@ import { commuteStatusMeta, CrowdingChip } from '../transit/status'
 import { useStartTrip } from '../use-trip-actions'
 import { TripInProgress } from './trip-in-progress'
 
-export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEvaluation; onCompare: () => void }) {
+export function CommuteHero({ evaluation, onCompare, onLive }: { evaluation: CommuteEvaluation; onCompare: () => void; onLive: () => void }) {
   const { commute, status, headline, detail, recommended: rec, usual, baseline, delta_min } = evaluation
   const meta = commuteStatusMeta[status]
   const StatusIcon = meta.icon
@@ -58,7 +58,7 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
 
       <div className="flex flex-col gap-5 p-5">
         {tripHere ? (
-          <TripInProgress trip={tripHere} />
+          <TripInProgress trip={tripHere} onOpen={onLive} />
         ) : rec ? (
           <>
             <div className="flex items-end justify-between gap-4">
@@ -99,6 +99,7 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
               ) : (
                 <>Learning your routine · {baseline.label}</>
               )}
+              {rec.fare ? ` · Fare ${fareLabel(rec.fare)}` : ''}
             </Text>
 
             <Divider />
@@ -161,12 +162,14 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
             <div className="flex flex-col gap-2">
               <Button
                 block
-                onClick={() => start(commute.id, rec)}
+                onClick={async () => {
+                  if (await start(commute.id, rec)) onLive()
+                }}
                 loading={pending === rec.id}
                 disabled={!rec.feasible}
                 icon={<Play className="size-4 fill-current" aria-hidden />}
               >
-                Start this route
+                I&apos;m leaving now
               </Button>
               <Button variant="secondary" block onClick={onCompare} icon={<ArrowRight className="size-4" aria-hidden />}>
                 Compare routes

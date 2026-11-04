@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Ban, ChevronDown, Footprints, Pin, Play, Repeat2 } from 'lucide-react'
-import { fmtMin, fmtPct, fmtTime } from '@/lib/format'
+import { fmtMin, fmtPct, fmtTime, fareLabel } from '@/lib/format'
 import type { RouteOption } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { Button } from '../primitives/button'
@@ -120,6 +120,7 @@ export function OptionCard({
           </Meta>
           {!off && <Meta>{fmtPct(option.on_time_chance)} on-time chance</Meta>}
           {option.reliability && <Meta>{option.reliability.label}</Meta>}
+          {option.fare && <Meta>{fareLabel(option.fare)}</Meta>}
         </div>
       </button>
 
@@ -180,7 +181,7 @@ export function OptionCard({
             <div className="flex flex-col gap-2">
               {canStart && (
                 <Button block onClick={onStart} loading={starting} icon={<Play className="size-4 fill-current" aria-hidden />}>
-                  Start this route
+                  I&apos;m leaving now
                 </Button>
               )}
               {!option.is_usual && (

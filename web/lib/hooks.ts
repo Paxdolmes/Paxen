@@ -61,6 +61,16 @@ export function useNearbyStops(lat: number | null, lon: number | null) {
     () => api.nearbyStops(lat as number, lon as number), { ...swrOpts, revalidateOnFocus: false })
 }
 
+export function useLiveTrip(id: string | null, pos: { lat: number; lon: number } | null) {
+  // Rounded so small GPS jitter doesn't refetch; the 20 s interval keeps live arrivals fresh.
+  const key = pos ? `${pos.lat.toFixed(4)},${pos.lon.toFixed(4)}` : 'clock'
+  return useSWR(id ? ['live', id, key] : null, () => api.tripLive(id as string, pos), {
+    ...swrOpts,
+    refreshInterval: (d) => (d && d.status !== 'active' ? 0 : 20_000),
+    keepPreviousData: true,
+  })
+}
+
 /** Revalidate every cached Paxen query. */
 export const revalidateAll = () => globalMutate(() => true)
 

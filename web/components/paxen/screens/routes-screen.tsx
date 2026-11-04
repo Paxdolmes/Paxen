@@ -130,7 +130,7 @@ export function RoutesScreen({ dashboard, nav }: { dashboard: Dashboard | undefi
               starting={pending === o.id}
               savingUsual={savingUsual === o.id}
               onStart={async () => {
-                if (commuteId && (await start(commuteId, o))) nav.go('today')
+                if (commuteId && (await start(commuteId, o))) nav.go('today', { live: '1' })
               }}
               onMakeUsual={() => makeUsual(o.id)}
             />

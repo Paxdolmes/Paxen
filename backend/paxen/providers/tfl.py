@@ -113,7 +113,8 @@ def parse_future_statuses(payload: list[dict]) -> list[dict]:
             if cat == GOOD:
                 continue
             for vp in st.get("validityPeriods") or [{}]:
-                out.append({"line_id": line["id"], "line_name": line.get("name", line["id"]), "category": cat,
+                out.append({"line_id": line["id"], "line_name": line.get("name", line["id"]),
+                            "mode": line.get("modeName", ""), "category": cat,
                             "description": st.get("statusSeverityDescription", ""), "reason": st.get("reason"),
                             "from": vp.get("fromDate"), "to": vp.get("toDate")})
     return out
@@ -231,7 +232,7 @@ def parse_journeys(payload: dict) -> list[Journey]:
                 line_name=line.get("name") or route.get("name") if mode != "walking" else None,
                 from_stop_id=dp.get("naptanId"),  # icsCode is a planner id; it is not valid for arrivals
                 to_stop_id=ap.get("naptanId"),
-                direction=directions[0] if directions else None,
+                direction=_clean_name(directions[0]) if directions else None,
                 stops=len(path_points) or None,
                 stop_ids=([first] if first else []) + path_ids,
                 path=_line_string((l.get("path") or {}).get("lineString")),

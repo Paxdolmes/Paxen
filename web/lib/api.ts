@@ -1,5 +1,6 @@
 import type {
   Alert,
+  LiveTrip,
   ChosenStop,
   NearbyStop,
   Commute,
@@ -178,6 +179,9 @@ export const api = {
   onboarding: (body: OnboardingIn) => request<unknown>('POST', '/v1/onboarding', body),
 
   searchPlaces: (q: string) => request<PlaceSearchResult[]>('GET', `/v1/places/search?q=${encodeURIComponent(q)}`),
+  tripLive: (id: string, pos?: { lat: number; lon: number } | null) =>
+    request<LiveTrip>('GET', `/v1/trips/${id}/live${pos ? `?lat=${pos.lat.toFixed(5)}&lon=${pos.lon.toFixed(5)}` : ''}`),
+  cancelTrip: (id: string) => request<unknown>('DELETE', `/v1/trips/${id}`),
   nearbyStops: (lat: number, lon: number) =>
     request<NearbyStop[]>('GET', `/v1/places/nearby-stops?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`),
   places: () => request<Place[]>('GET', '/v1/places'),

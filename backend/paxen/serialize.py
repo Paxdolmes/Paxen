@@ -58,8 +58,11 @@ def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) 
         "live_data": f.live_data,
         "legs": [{
             "mode": l.mode, "line_id": l.line_id, "line_name": l.line_name,
-            "from": ev.commute.origin.name if l.from_name == "Start" else l.from_name,
-            "to": ev.commute.dest.name if l.to_name == "Destination" else l.to_name,
+            # The planner names the ends after reverse-geocoded addresses ("472 FULHAM ROAD"); use the user's names.
+            "from": ev.commute.origin.name if i == 0 and (l.mode == "walking" or l.from_name == "Start") else l.from_name,
+            "to": ev.commute.dest.name if i == len(f.legs) - 1 and (l.mode == "walking" or l.to_name == "Destination")
+            else l.to_name,
+            "from_stop_id": j.legs[i].from_stop_id, "stop_ids": j.legs[i].stop_ids or None,
             "direction": l.direction, "wait_min": l.wait_min, "ride_min": l.ride_min, "live": l.live,
             "status": l.category, "next_departures_min": l.next_departures_min,
             "path": [list(pt) for pt in leg_paths[i]] if with_paths else None,

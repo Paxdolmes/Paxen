@@ -33,6 +33,7 @@ export function useNav() {
 
   return {
     tab,
+    live: params.get('live') === '1',
     commute: params.get('commute'),
     pref: (params.get('pref') as Preference | null) ?? undefined,
     go,

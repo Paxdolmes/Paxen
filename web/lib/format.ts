@@ -109,3 +109,21 @@ export const CATEGORY_LABELS: Record<LineCategory, string> = {
   part_suspended: 'Part suspended',
   suspended: 'Suspended',
 }
+
+
+/** 310 -> "£3.10" */
+export function fmtFare(pence: number | null | undefined) {
+  if (pence == null) return null
+  return `£${(pence / 100).toFixed(2)}`
+}
+
+/** Fare with the other time-of-day price when it differs: "£3.10 (peak £3.60)". */
+export function fareLabel(fare: { pence: number; peak_pence: number | null; off_peak_pence: number | null } | null | undefined) {
+  if (!fare) return null
+  const now = fmtFare(fare.pence)
+  if (fare.peak_pence != null && fare.off_peak_pence != null && fare.peak_pence !== fare.off_peak_pence) {
+    const isPeak = fare.pence === fare.peak_pence
+    return `${now} (${isPeak ? 'off-peak' : 'peak'} ${fmtFare(isPeak ? fare.off_peak_pence : fare.peak_pence)})`
+  }
+  return now
+}

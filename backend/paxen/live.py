@@ -62,9 +62,16 @@ def _by_clock(plan: dict, elapsed_min: float) -> tuple[int, float]:
     return len(plan["legs"]) - 1, 1.0
 
 
+TOO_FAST = 0.5  # faster than half the quickest forecast: GPS error, a test, or started at the destination
+
+
 def finish(trip: Trip, arrived: datetime, status: str = "arrived") -> None:
     if status == "arrived":
         dur = (arrived - aware(trip.started_at)).total_seconds() / 60
+        p10 = ((trip.plan or {}).get("forecast") or {}).get("p10") or trip.forecast_p10
+        if p10 and dur < TOO_FAST * p10:
+            trip.status = "too_fast"  # kept out of the learning data: not a real door-to-door time
+            return
         trip.arrived_at, trip.duration_min = naive_utc(arrived), round(max(0.5, dur), 1)
     trip.status = status
 
@@ -78,14 +85,14 @@ def live_status(s: Session, provider: Provider, trip: Trip, now: datetime,
             "elapsed_min": round(elapsed, 1), "legs": plan.get("legs", []), "dest": plan.get("dest"),
             "origin": plan.get("origin"), "forecast_at_start": plan.get("forecast")}
 
-    if trip.status in ("arrived", "auto_closed"):
+    if trip.status in ("arrived", "auto_closed", "too_fast"):
         return {**base, "status": trip.status, "duration_min": trip.duration_min,
                 "vs_forecast_min": _vs(trip)}
     dest = plan.get("dest") or {}
     if pos and dest.get("lat") is not None and _dist_m(pos, (dest["lat"], dest["lon"])) <= ARRIVED_M:
         finish(trip, now)
         s.commit()
-        return {**base, "status": "arrived", "duration_min": trip.duration_min, "vs_forecast_min": _vs(trip)}
+        return {**base, "status": trip.status, "duration_min": trip.duration_min, "vs_forecast_min": _vs(trip)}
     p90 = (plan.get("forecast") or {}).get("p90") or trip.forecast_p90 or 90
     if not pos and elapsed > p90 + STALE_AFTER_MIN:
         finish(trip, now, "auto_closed")

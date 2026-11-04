@@ -7,6 +7,7 @@ import { Card, Section, Skeleton } from '../primitives/card'
 import { ErrorState } from '../primitives/states'
 import { Text } from '../primitives/text'
 import { CommuteHero } from '../today/commute-hero'
+import { ConditionsStrip, UpcomingCard } from '../today/conditions'
 import { LinesOnRoutes, OtherCommuteCard } from '../today/secondary-cards'
 import type { useNav } from '../use-nav'
 
@@ -42,7 +43,21 @@ export function TodayScreen({
         )}
       </div>
 
-      {active && <CommuteHero evaluation={active} onCompare={() => openRoutes(active.commute.id)} />}
+      {active && (
+        <CommuteHero
+          evaluation={active}
+          onCompare={() => openRoutes(active.commute.id)}
+          onLive={() => nav.go('today', { live: '1' })}
+        />
+      )}
+
+      {active && <ConditionsStrip conditions={active.conditions} />}
+
+      {(dashboard.upcoming?.length ?? 0) > 0 && (
+        <Section title="Coming up on your lines">
+          <UpcomingCard items={dashboard.upcoming ?? []} />
+        </Section>
+      )}
 
       {others.length > 0 && (
         <Section title="Your other commute">

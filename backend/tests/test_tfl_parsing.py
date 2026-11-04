@@ -64,7 +64,7 @@ def test_parse_journeys():
     assert j.summary == "Victoria"
     assert j.walking_min == 11 and j.changes == 0
     assert j.signature == "tube:victoria@940GZZLUWWL"
-    assert j.legs[1].direction == "Brixton Underground Station" and j.legs[1].stops == 9
+    assert j.legs[1].direction == "Brixton" and j.legs[1].stops == 9
     assert j.departure.utcoffset().total_seconds() == 0  # London local in November == UTC
 
 

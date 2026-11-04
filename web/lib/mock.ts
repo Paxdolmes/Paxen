@@ -251,6 +251,48 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
     ev.usual = ev.options.find((o) => o.id === sig) ?? null
     return updateCommute(ev.commute.id, { usual_signature: sig, usual_summary: opt.summary })
   }
+  if ((m = path.match(/^\/v1\/trips\/([^/]+)\/live$/)) && method === 'GET') {
+    // Demo: progress follows the clock along the option the trip was started on (no map shapes in demo data).
+    const trip = state.trips.find((t) => t.id === m![1])
+    if (!trip) throw new ApiError(404, 'Trip not found')
+    const opt = d.commutes.flatMap((c) => c.options).find((o) => o.id === trip.signature)
+    const legs = (opt?.legs ?? []).map((l) => ({ ...l, path: null }))
+    const started = new Date(trip.started_at).getTime()
+    const elapsed = (Date.now() - started) / 60_000
+    const p50 = trip.forecast.p50 ?? opt?.duration.p50 ?? 30
+    const base = {
+      trip_id: trip.id, summary: trip.summary, started_at: trip.started_at, elapsed_min: elapsed, legs,
+      origin: null, dest: null, forecast_at_start: opt?.duration ?? null,
+    }
+    if (trip.arrived_at) {
+      return { ...base, status: 'arrived', duration_min: trip.duration_min, vs_forecast_min: trip.duration_min != null ? trip.duration_min - p50 : null }
+    }
+    let t = 0
+    let idx = 0
+    for (let i = 0; i < legs.length; i++) {
+      const dur = legs[i].wait_min + legs[i].ride_min
+      idx = i
+      if (elapsed <= t + dur) break
+      t += dur
+    }
+    const remaining = Math.max(1, p50 - elapsed)
+    const eta = new Date(Date.now() + remaining * 60_000).toISOString()
+    const nextLeg = legs.slice(idx).find((l) => l.line_id)
+    return {
+      ...base, status: 'active', located_by: 'clock', current_leg: idx,
+      phase: legs[idx]?.mode === 'walking' ? 'walking' : 'waiting', progress: 0,
+      remaining_min: { p10: remaining * 0.9, p50: remaining, p90: remaining * 1.2 }, eta,
+      eta_range: [new Date(Date.now() + remaining * 0.9 * 60_000).toISOString(), new Date(Date.now() + remaining * 1.2 * 60_000).toISOString()],
+      confidence: opt?.confidence ?? 'medium',
+      next_departure: nextLeg ? { line_name: nextLeg.line_name, line_id: nextLeg.line_id, stop: nextLeg.from, direction: nextLeg.direction,
+        wait_min: nextLeg.wait_min, departures_min: nextLeg.next_departures_min, live: nextLeg.live, leg_index: legs.indexOf(nextLeg) } : null,
+      disruptions: opt?.disruptions ?? [],
+    }
+  }
+  if ((m = path.match(/^\/v1\/trips\/([^/]+)$/)) && method === 'DELETE') {
+    state.trips = state.trips.filter((t) => t.id !== m![1])
+    return { ok: true }
+  }
   if ((m = path.match(/^\/v1\/trips\/([^/]+)\/arrive$/)) && method === 'POST') {
     const trip = state.trips.find((t) => t.id === m![1])
     if (!trip) throw new ApiError(404, 'Trip not found')

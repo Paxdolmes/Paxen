@@ -70,6 +70,7 @@ export interface Leg {
   live: boolean // wait is based on live arrivals (+ correction model)
   status: LineCategory
   next_departures_min: number[] // relative to when you reach the stop
+  path?: [number, number][] | null // route shape (lat, lon); included by /compare and live trips
 }
 
 export interface Disruption {
@@ -91,6 +92,7 @@ export interface RouteOption {
   arrive_range: [string, string] // 10th–90th percentile arrival
   duration: { p10: number; p50: number; p90: number } // door-to-door minutes
   nominal_min: number // timetable duration with no disruption
+  fare: { pence: number; peak_pence: number | null; off_peak_pence: number | null } | null
   vs_usual_min: number | null // + slower / − faster than the usual route today
   walking_min: number
   changes: number
@@ -122,6 +124,7 @@ export interface CommuteEvaluation {
   gain_min: number | null // minutes saved by the recommended route vs usual
   preference: Preference
   chosen_stops_honoured: boolean // false: nothing runs via the user's chosen stations right now; all routes shown
+  conditions?: Conditions | null
   baseline: Baseline
   usual: RouteOption | null
   recommended: RouteOption | null
@@ -168,6 +171,74 @@ export interface Dashboard {
   commutes: CommuteEvaluation[]
   network: LineStatus[] // lines on my routes first, worst first
   unread_alerts: number
+  upcoming?: UpcomingDisruption[] // planned closures in the next 7 days on my lines
+}
+
+export interface Weather {
+  time: string // "08:00"
+  rain_prob: number | null
+  rain_mm: number | null
+  temp_c: number | null
+  wet: boolean
+  summary: string // "Dry" | "Chance of rain" | "Rain likely" | "Heavy rain"
+}
+
+export interface AirQuality {
+  band: string // "Low" | "Moderate" | "High" | "Very High"
+  level: number | null
+  summary: string
+  tomorrow_band: string | null
+  usual_band: string | null
+  history_days: number
+  worse_than_usual: boolean
+  label: string // "High today (usually Low)"
+}
+
+export interface Conditions {
+  weather?: Weather | null
+  air_quality?: AirQuality | null
+  walking_note?: string | null // why long walks are ranked lower today
+}
+
+export interface UpcomingDisruption {
+  line_id: string
+  line_name: string
+  mode: Mode
+  category: LineCategory
+  description: string
+  reason: string | null
+  from: string
+  to: string | null
+  starts_local: string // "Mon 09 Nov, 22:45"
+  commutes: string[] // which of my commutes use this line
+}
+
+export interface LiveTrip {
+  trip_id: string
+  status: 'active' | 'arrived' | 'auto_closed' | 'too_fast'
+  summary: string | null
+  started_at: string
+  elapsed_min: number
+  legs: { mode: Mode; line_id: string | null; line_name: string | null; from: string; to: string;
+          direction: string | null; wait_min: number; ride_min: number; path: [number, number][] | null }[]
+  origin: { name: string; lat: number; lon: number } | null
+  dest: { name: string; lat: number; lon: number } | null
+  forecast_at_start: { p10: number; p50: number; p90: number } | null
+  // active only
+  located_by?: 'position' | 'clock'
+  current_leg?: number
+  phase?: 'walking' | 'waiting' | 'on_board'
+  progress?: number
+  remaining_min?: { p10: number; p50: number; p90: number }
+  eta?: string
+  eta_range?: [string, string]
+  confidence?: Confidence
+  next_departure?: { line_name: string | null; line_id: string; stop: string; direction: string | null;
+                     wait_min: number; departures_min: number[]; live: boolean; leg_index: number } | null
+  disruptions?: Disruption[]
+  // ended
+  duration_min?: number | null
+  vs_forecast_min?: number | null
 }
 
 export interface Alert {
@@ -253,6 +324,7 @@ GET    /v1/trips | POST /v1/trips { commute_id, signature, summary, forecast_p10
 POST   /v1/trips/:id/arrive {}           -> Trip (duration computed)
 GET    /v1/alerts | POST /v1/alerts/read | POST /v1/alerts/:id/feedback { feedback, note? }
 GET    /v1/insights                      -> Insights
+GET    /v1/trips/:id/live?lat=&lon=      -> LiveTrip   (position optional, used for this call only, never stored)
 Simulator only: GET /v1/dev/scenarios, POST /v1/dev/scenario { scenario }, POST /v1/dev/check-now, POST /v1/dev/seed
   scenarios: auto | normal | victoria-severe | victoria-suspended | central-minor | weaver-suspended | mixed
 */
