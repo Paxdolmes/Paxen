@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import ModelVersion, ObservedArrival, Prediction
-from .timeutil import aware, hour_band
+from .timeutil import aware, hour_band, naive_utc
 
 LEAD_BUCKETS = [(0, 120, "0-2m"), (120, 300, "2-5m"), (300, 600, "5-10m"), (600, 1200, "10-20m"), (1200, 1e9, "20m+")]
 SHRINK_K = 25.0
@@ -65,7 +65,7 @@ class Sample:
 
 
 def load_samples(s: Session, source: str, since: datetime | None = None, min_quality: float = 0.3,
-                 methods: tuple[str, ...] | None = None) -> list[Sample]:
+                 methods: tuple[str, ...] | None = None, until: datetime | None = None) -> list[Sample]:
     """Pair each recorded prediction with the arrival it was predicting.
 
     Matching uses the vehicle id plus direction: for measured (Trackernet) arrivals the platform's bound
@@ -87,7 +87,9 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
                Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S)
     )
     if since:
-        q = q.where(Prediction.polled_at >= since)
+        q = q.where(Prediction.polled_at >= naive_utc(since))
+    if until:
+        q = q.where(Prediction.polled_at < naive_utc(until))
     if methods:
         q = q.where(ObservedArrival.method.in_(methods))
     best: dict[int, tuple] = {}

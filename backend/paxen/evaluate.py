@@ -108,10 +108,41 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
     return report
 
 
+MAX_PER_DAY = 25_000  # memory guard: a fixed random sample of each day's training pairs
+
+
+def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: int = 0) -> list[Sample]:
+    """Load history one London day at a time, keeping at most MAX_PER_DAY pairs per day (same seed, same sample)."""
+    import random
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from .db import Prediction
+    from .timeutil import LONDON, aware
+
+    lo, hi = s.execute(select(func.min(Prediction.polled_at), func.max(Prediction.polled_at))
+                       .where(Prediction.source == source)).one()
+    if not lo:
+        return []
+    day = aware(lo).astimezone(LONDON).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = aware(hi)
+    out: list[Sample] = []
+    while day <= end:
+        nxt = (day + timedelta(days=1, hours=2)).replace(hour=0)  # DST-safe next local midnight
+        batch = load_samples(s, source, since=day, until=nxt, methods=methods)
+        if len(batch) > MAX_PER_DAY:
+            batch = random.Random(f"{seed}-{day.date()}").sample(batch, MAX_PER_DAY)
+        out += batch
+        day = nxt
+    out.sort(key=lambda x: x.polled_at)
+    return out
+
+
 def run(s: Session, source: str, promote: bool = True) -> dict:
     """Evaluate on the database's history. Ground truth: measured (Trackernet) when it exists, else inferred."""
-    measured = load_samples(s, source, methods=("trackernet",))
-    samples = measured if measured else load_samples(s, source)
+    measured = load_daily(s, source, ("trackernet",))
+    samples = measured if measured else load_daily(s, source, None)
     report = evaluate(samples)
     report["ground_truth"] = "measured (Trackernet)" if measured else "inferred from countdowns"
     if promote:
