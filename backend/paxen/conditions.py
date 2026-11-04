@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import AirQualityDay
+from .cache import prune
 from .providers.base import Provider
 from .redact import redact
 from .timeutil import local
@@ -40,6 +41,7 @@ def _cached(key: tuple, ttl: float, fetch):
         val = None
     with _lock:
         _cache[key] = (time.monotonic(), val)
+        prune(_cache, 3600, 1000)
     return val
 
 

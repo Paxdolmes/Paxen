@@ -18,6 +18,7 @@ import logging
 
 import httpx
 
+from ..cache import prune
 from ..redact import check, redact
 
 from ..domain import (
@@ -399,6 +400,7 @@ class TflProvider:
             found += parse_journeys(data)
         out = dedupe_journeys(found)
         self._journey_cache[key] = (time.monotonic(), out)
+        prune(self._journey_cache, JOURNEY_CACHE_S, 500)
         return list(out)
 
     def search_places(self, query: str) -> list[PlaceResult]:
@@ -442,6 +444,7 @@ class TflProvider:
         except (httpx.HTTPError, ValueError, KeyError):
             val = None
         self._crowd_cache[key] = (time.monotonic(), val)
+        prune(self._crowd_cache, 12 * 3600, 2000)
         return val
 
     def station_crowding(self, stop_id: str | None, when: datetime, live: bool = False) -> dict | None:

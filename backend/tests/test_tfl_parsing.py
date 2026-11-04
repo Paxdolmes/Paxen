@@ -191,3 +191,11 @@ def test_upstream_errors_never_carry_the_key():
         p.arrivals("940GZZLUVIC", None, max_age_s=0)
     assert "SECRETKEY123" not in str(exc.value) and "503" in str(exc.value)
     assert redact("for url 'https://x/y?app_key=SECRETKEY123&z=1'") == "for url 'https://x/y?app_key=***&z=1'"
+
+
+def test_time_bucketed_caches_stay_bounded():
+    import time
+    from paxen.cache import prune
+    c = {i: (time.monotonic() - (1000 if i < 900 else 0), i) for i in range(1200)}
+    prune(c, max_age_s=120, max_entries=500)
+    assert len(c) <= 500 and all(k >= 900 for k in c)  # expired entries go first
