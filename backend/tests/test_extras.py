@@ -93,12 +93,12 @@ def test_live_trip_progress_and_auto_arrival(monkeypatch):
 
         clock["t"] = MORNING + timedelta(minutes=12)  # on the train, between stations
         mid = opt["legs"][1]["path"][len(opt["legs"][1]["path"]) // 2]
-        live = c.get(f"/v1/trips/{trip['id']}/live", params={"lat": mid[0], "lon": mid[1]}).json()
+        live = c.post(f"/v1/trips/{trip['id']}/live", json={"lat": mid[0], "lon": mid[1]}).json()
         assert live["located_by"] == "position" and live["current_leg"] == 1 and live["phase"] == "on_board"
         before = live["remaining_min"]["p50"]
 
         clock["t"] = MORNING + timedelta(minutes=31)  # at the destination: ends itself
-        done = c.get(f"/v1/trips/{trip['id']}/live", params={"lat": WORK[0], "lon": WORK[1]}).json()
+        done = c.post(f"/v1/trips/{trip['id']}/live", json={"lat": WORK[0], "lon": WORK[1]}).json()
         assert done["status"] == "arrived" and done["duration_min"] == 31.0 and before > 0
         assert c.get("/v1/trips").json()[0]["status"] == "arrived"
 

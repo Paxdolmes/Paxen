@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from .db import AirQualityDay
 from .providers.base import Provider
+from .redact import redact
 from .timeutil import local
 
 log = logging.getLogger("paxen.conditions")
@@ -35,7 +36,7 @@ def _cached(key: tuple, ttl: float, fetch):
     try:
         val = fetch()
     except Exception as e:  # a conditions source being down must never break a commute view
-        log.warning("conditions source failed (%s): %s", key[0], e)
+        log.warning("conditions source failed (%s): %s", key[0], redact(e))
         val = None
     with _lock:
         _cache[key] = (time.monotonic(), val)

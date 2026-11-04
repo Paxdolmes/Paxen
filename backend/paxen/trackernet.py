@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from .redact import check
+
 from .timeutil import LONDON
 
 log = logging.getLogger("paxen.trackernet")
@@ -100,7 +102,7 @@ class Trackernet:
 
     def summary(self, line_code: str) -> tuple[datetime | None, list[TrainAtPlatform], bytes]:
         r = self.client.get(f"{self.base}/trackernet/PredictionSummary/{line_code}", params={"app_key": self.key})
-        r.raise_for_status()
+        check(r, f"Trackernet {line_code}")
         ts, trains = parse_summary(r.content, line_code)
         return ts, trains, r.content
 
@@ -113,7 +115,7 @@ class Trackernet:
             for lid in LINE_CODES[line_code]:
                 params = {"app_key": self.app_key} if self.app_key else {}
                 r = self.client.get(f"{self.base}/Line/{lid}/StopPoints", params=params)
-                r.raise_for_status()
+                check(r, f"TfL /Line/{lid}/StopPoints")
                 for sp in r.json():
                     nid = sp.get("naptanId") or sp.get("stationNaptan")
                     if nid:

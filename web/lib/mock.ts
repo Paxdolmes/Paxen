@@ -141,16 +141,19 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
       }
       return { ok: true }
     }
+    case 'POST /v1/places/search':
     case 'GET /v1/places/search': {
-      const q = (query.get('q') ?? '').trim().toLowerCase()
+      const q = ((body as { q?: string } | undefined)?.q ?? query.get('q') ?? '').trim().toLowerCase()
       if (q.length < 2) return []
       return SEARCH_INDEX.filter((p) => `${p.name} ${p.detail ?? ''}`.toLowerCase().includes(q)).slice(0, 8)
     }
     case 'GET /v1/places':
       return places()
+    case 'POST /v1/places/nearby-stops':
     case 'GET /v1/places/nearby-stops': {
-      const lat = Number(query.get('lat'))
-      const lon = Number(query.get('lon'))
+      const pt = body as { lat?: number; lon?: number } | undefined
+      const lat = Number(pt?.lat ?? query.get('lat'))
+      const lon = Number(pt?.lon ?? query.get('lon'))
       const metres = (a: number, b: number) =>
         Math.hypot((a - lat) * 111_320, (b - lon) * 111_320 * Math.cos((lat * Math.PI) / 180))
       return SEARCH_INDEX.filter((p) => p.kind === 'station')
@@ -251,7 +254,7 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
     ev.usual = ev.options.find((o) => o.id === sig) ?? null
     return updateCommute(ev.commute.id, { usual_signature: sig, usual_summary: opt.summary })
   }
-  if ((m = path.match(/^\/v1\/trips\/([^/]+)\/live$/)) && method === 'GET') {
+  if ((m = path.match(/^\/v1\/trips\/([^/]+)\/live$/)) && (method === 'GET' || method === 'POST')) {
     // Demo: progress follows the clock along the option the trip was started on (no map shapes in demo data).
     const trip = state.trips.find((t) => t.id === m![1])
     if (!trip) throw new ApiError(404, 'Trip not found')

@@ -111,3 +111,21 @@ def test_onboarding_with_chosen_stations(client):
     card = client.get("/v1/dashboard").json()["commutes"][0]
     assert card["chosen_stops_honoured"]
     assert all(o["legs"][1]["from"] == "Walthamstow Central" for o in card["options"])
+
+
+def test_personal_data_endpoints_accept_post_bodies(client):
+    onboard(client)
+    assert client.post("/v1/places/search", json={"q": "oxford"}).json()[0]["name"] == "Oxford Circus"
+    near = client.post("/v1/places/nearby-stops", json={"lat": HOME[0], "lon": HOME[1]}).json()
+    assert any(n["stop_id"] == "walthamstow-central" for n in near)
+
+
+def test_access_log_drops_query_strings():
+    import logging
+
+    import paxen.main as main
+
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("1.2.3.4:5", "GET", "/v1/trips/x/live?lat=51.5&lon=-0.1", "1.1", 200), None)
+    main._NoQueryStrings().filter(rec)
+    assert "51.5" not in rec.getMessage() and "/v1/trips/x/live" in rec.getMessage()

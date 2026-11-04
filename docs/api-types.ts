@@ -17,7 +17,7 @@ export interface Place {
   stops: ChosenStop[] // stations/stops the user chose for this place; [] = let Paxen choose
 }
 
-/** A station or stop near a place (GET /v1/places/nearby-stops), nearest first. */
+/** A station or stop near a place (POST /v1/places/nearby-stops), nearest first. */
 export interface NearbyStop {
   stop_id: string
   name: string
@@ -311,8 +311,8 @@ GET    /v1/me | PATCH /v1/me (Partial<User> + push_token) | DELETE /v1/me
 DELETE /v1/me/history                    -> { trips_deleted, alerts_deleted }
 POST   /v1/onboarding  { name?, home: PlaceIn, work: PlaceIn, days, morning: {start,end}, evening: {start,end}, preference }
                                          PlaceIn = { label, name, lat, lon, source }
-GET    /v1/places/search?q=              -> PlaceSearchResult[]   addresses/postcodes first, then stations
-GET    /v1/places/nearby-stops?lat=&lon= -> NearbyStop[]
+POST   /v1/places/search {q}             -> PlaceSearchResult[]   addresses/postcodes first, then stations
+POST   /v1/places/nearby-stops {lat,lon} -> NearbyStop[]
        PlaceIn and PATCH /v1/places/:id accept stops: ChosenStop[]
 GET    /v1/places | PATCH /v1/places/:id | DELETE /v1/places/:id
 GET    /v1/commutes | PATCH /v1/commutes/:id { days?, window_start?, window_end?, preference?, alerts_enabled? }
@@ -324,7 +324,8 @@ GET    /v1/trips | POST /v1/trips { commute_id, signature, summary, forecast_p10
 POST   /v1/trips/:id/arrive {}           -> Trip (duration computed)
 GET    /v1/alerts | POST /v1/alerts/read | POST /v1/alerts/:id/feedback { feedback, note? }
 GET    /v1/insights                      -> Insights
-GET    /v1/trips/:id/live?lat=&lon=      -> LiveTrip   (position optional, used for this call only, never stored)
+POST   /v1/trips/:id/live {lat?,lon?}    -> LiveTrip   (position optional, used for this call only, never stored)
+       Personal data always travels in bodies, never URLs (URLs are logged by servers and hosts).
 Simulator only: GET /v1/dev/scenarios, POST /v1/dev/scenario { scenario }, POST /v1/dev/check-now, POST /v1/dev/seed
   scenarios: auto | normal | victoria-severe | victoria-suspended | central-minor | weaver-suspended | mixed
 */

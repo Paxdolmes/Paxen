@@ -177,3 +177,17 @@ def test_network_endpoint_without_time_to_station():
              "destinationName": "Heathrow Terminal 4 Rail Station"}]
     [a] = parse_mode_arrivals(rows)
     assert a.time_to_station_s == 480 and a.stop_id == "910GACTONML" and a.direction == "Heathrow Terminal 4"
+
+
+def test_upstream_errors_never_carry_the_key():
+    import httpx
+    import pytest
+    from paxen.providers.tfl import TflProvider
+    from paxen.redact import redact
+
+    p = TflProvider("https://api.tfl.gov.uk", "SECRETKEY123")
+    p.client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(503, text="busy")))
+    with pytest.raises(httpx.HTTPError) as exc:
+        p.arrivals("940GZZLUVIC", None, max_age_s=0)
+    assert "SECRETKEY123" not in str(exc.value) and "503" in str(exc.value)
+    assert redact("for url 'https://x/y?app_key=SECRETKEY123&z=1'") == "for url 'https://x/y?app_key=***&z=1'"

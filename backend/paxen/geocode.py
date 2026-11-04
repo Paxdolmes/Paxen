@@ -96,5 +96,5 @@ def geocode(query: str) -> tuple[PlaceResult, ...]:
                 return tuple(search_postcodes(q, client))
             return tuple(search_addresses(q, client))
     except Exception as e:
-        log.warning("geocoding failed for %r: %s", q, e)
+        log.warning("geocoding failed: %s", type(e).__name__)  # never log the query: it's often a home address
         return ()

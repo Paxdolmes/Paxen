@@ -18,6 +18,8 @@ import logging
 
 import httpx
 
+from ..redact import check, redact
+
 from ..domain import (
     GOOD, MINOR, PART_SUSPENDED, SEVERE, SEVERITY_ORDER, SUSPENDED,
     Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult, StatusSection, simplify_path,
@@ -335,12 +337,13 @@ class TflProvider:
         }
         if self.app_key and r.status_code in (401, 403, 429) and "invalid app_key" in r.text.lower():
             # A wrong/revoked key must not take the app offline: fall back to anonymous access (50 req/min).
-            log.error("TfL rejected TFL_APP_KEY (%s). Falling back to anonymous access; check the key.", r.text[:80])
+            log.error("TfL rejected TFL_APP_KEY (%s). Falling back to anonymous access; check the key.",
+                      redact(r.text[:80]))
             self.app_key = None
             params.pop("app_key", None)
             r = self.client.get(f"{self.base}{path}", params=params)
         latency = int((time.monotonic() - t0) * 1000)
-        r.raise_for_status()
+        check(r, f"TfL {path}")
         return r.json(), r.text, r.status_code, latency
 
     def arrivals(self, stop_id: str, now: datetime, max_age_s: float = ARRIVALS_CACHE_S) -> FetchResult:
@@ -359,7 +362,7 @@ class TflProvider:
         params = {"count": "-1", "_": _cache_buster(), **({"app_key": self.app_key} if self.app_key else {})}
         t0 = time.monotonic()
         r = self.client.get(f"{self.base}/Mode/{mode}/Arrivals", params=params, timeout=180)
-        r.raise_for_status()
+        check(r, f"TfL /Mode/{mode}/Arrivals")
         return r.content, r.status_code, int((time.monotonic() - t0) * 1000)
 
     def mode_arrivals(self, mode: str, now: datetime) -> FetchResult:

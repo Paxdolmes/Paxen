@@ -33,6 +33,19 @@ from .recorder import feed_health
 from .timeutil import aware, local, naive_utc, utcnow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+
+class _NoQueryStrings(logging.Filter):
+    """Access logs keep the path but never the query string (positions, home coordinates, address searches)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str) and "?" in args[2]:
+            record.args = args[:2] + (args[2].split("?", 1)[0],) + args[3:]
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_NoQueryStrings())
 # Request URLs carry the TfL app_key: never log them.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -301,6 +314,32 @@ def onboarding(body: OnboardingIn, u: User = Depends(current_user), s: Session =
 
 
 # ------------------------------------------------------------------------- places
+class SearchIn(BaseModel):
+    q: str = Field(min_length=2, max_length=80)
+
+
+class PointIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+class LiveIn(BaseModel):
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+
+
+# Personal data (addresses, home coordinates, live position) goes in request bodies: URLs end up in access logs
+# and the hosting provider's HTTP logs. The GET forms remain for older app versions.
+@app.post("/v1/places/search")
+def search_places_post(body: SearchIn, u: User = Depends(current_user)):
+    return search_places(body.q, u)
+
+
+@app.post("/v1/places/nearby-stops")
+def nearby_stops_post(body: PointIn, u: User = Depends(current_user)):
+    return nearby_stops(body.lat, body.lon, u)
+
+
 @app.get("/v1/places/search")
 def search_places(q: str = Query(min_length=2, max_length=80), _: User = Depends(current_user)):
     """Addresses and postcodes (geocoded) first, then matching stations/stops."""
@@ -311,7 +350,7 @@ def search_places(q: str = Query(min_length=2, max_length=80), _: User = Depends
         stations = get_provider().search_places(q)
     except Exception as e:
         if not addresses:
-            raise HTTPException(502, f"Place search unavailable: {e}") from e
+            raise HTTPException(502, "Place search is unavailable right now. Try again shortly.") from e
         stations = []
     return [r.__dict__ for r in addresses[:6] + stations[:8]]
 
@@ -323,7 +362,7 @@ def nearby_stops(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, 
     try:
         return [n.__dict__ for n in get_provider().nearby_stops(lat, lon)]
     except Exception as e:
-        raise HTTPException(502, f"Nearby stops unavailable: {e}") from e
+        raise HTTPException(502, "Nearby stations are unavailable right now. Try again shortly.") from e
 
 
 @app.get("/v1/places")
@@ -555,6 +594,12 @@ def start_trip(body: TripIn, u: User = Depends(current_user), s: Session = Depen
     s.add(t)
     s.commit()
     return ser.trip(t)
+
+
+@app.post("/v1/trips/{trip_id}/live")
+def trip_live_post(trip_id: str, body: LiveIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    """Live trip with the phone's position in the body. The position is used for this response only."""
+    return trip_live(trip_id, body.lat, body.lon, u, s)
 
 
 @app.get("/v1/trips/{trip_id}/live")

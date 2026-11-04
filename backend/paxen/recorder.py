@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from .db import LineStatusSnapshot, ObservedArrival, Prediction, RawSnapshot, WatchedStop
 from .domain import GOOD
 from .archive import archive_raw
+from .redact import redact
 from .providers.base import Provider
 from .timeutil import aware, naive_utc
 
@@ -48,8 +49,8 @@ def record_statuses(s: Session, provider: Provider, now: datetime) -> dict[str, 
     try:
         res = provider.line_statuses(now)
     except Exception as e:  # keep a record of feed failures: they matter for freshness/confidence
-        s.add(RawSnapshot(source=provider.name, endpoint="line_status", polled_at=polled, status=0, error=str(e)))
-        log.warning("status poll failed: %s", e)
+        s.add(RawSnapshot(source=provider.name, endpoint="line_status", polled_at=polled, status=0, error=redact(e)[:500]))
+        log.warning("status poll failed: %s",redact(e))
         return {}
     s.add(RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
                       latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw))
@@ -83,8 +84,8 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
             res = provider.arrivals(stop_id, now)
     except Exception as e:
         s.add(RawSnapshot(source=provider.name, endpoint=f"arrivals:{stop_id}", polled_at=polled, status=0,
-                          error=str(e)))
-        log.warning("arrivals poll failed for %s: %s", stop_id, e)
+                          error=redact(e)[:500]))
+        log.warning("arrivals poll failed for %s: %s", stop_id,redact(e))
         return 0
     raw = RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
                       latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw)
@@ -154,8 +155,8 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
         res = provider.mode_arrivals(mode, now)
     except Exception as e:
         s.add(RawSnapshot(source=provider.name, endpoint=f"/Mode/{mode}/Arrivals", polled_at=polled, status=0,
-                          error=str(e)[:500]))
-        log.warning("network poll failed for %s: %s", mode, e)
+                          error=redact(e)[:500]))
+        log.warning("network poll failed for %s: %s", mode,redact(e))
         return {"mode": mode, "seen": 0, "kept": 0}
     key = archive_raw(provider.name, f"mode-{mode}", now, res.raw, archive)
     raw = RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
@@ -197,10 +198,10 @@ def archive_network(s: Session, provider: Provider, mode: str, now: datetime, ar
     try:
         raw, status, latency = provider.mode_arrivals_raw(mode)
     except Exception as e:
-        s.add(RawSnapshot(source=provider.name, endpoint=endpoint, polled_at=polled, status=0, error=str(e)[:500]))
+        s.add(RawSnapshot(source=provider.name, endpoint=endpoint, polled_at=polled, status=0, error=redact(e)[:500]))
         s.commit()
-        log.warning("archive-only poll failed for %s: %s", mode, e)
-        return {"mode": mode, "archived": False, "error": str(e)[:120]}
+        log.warning("archive-only poll failed for %s: %s", mode,redact(e))
+        return {"mode": mode, "archived": False, "error": redact(e)[:120]}
     key = archive_raw(provider.name, f"mode-{mode}", now, raw, archive)
     s.add(RawSnapshot(source=provider.name, endpoint=endpoint, polled_at=polled, status=status, latency_ms=latency,
                       item_count=0, payload=None, archive_key=key))
@@ -319,7 +320,7 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
             stations = tn.station_map(code, names)
         except Exception as e:
             failed.append(code)
-            log.warning("trackernet %s failed: %s", code, e)
+            log.warning("trackernet %s failed: %s", code,redact(e))
             continue
         for t in trains:
             naptan = stations.get(t.station_code)

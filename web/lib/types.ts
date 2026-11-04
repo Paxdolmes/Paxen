@@ -17,7 +17,7 @@ export interface Place {
   stops: ChosenStop[] // stations/stops the user chose for this place; [] = let Paxen choose
 }
 
-/** A station or stop near a place (GET /v1/places/nearby-stops), nearest first. */
+/** A station or stop near a place (POST /v1/places/nearby-stops), nearest first. */
 export interface NearbyStop {
   stop_id: string
   name: string
