@@ -56,6 +56,11 @@ export function usePlaceSearch(q: string) {
   })
 }
 
+export function useNearbyStops(lat: number | null, lon: number | null) {
+  return useSWR(lat != null && lon != null ? ['nearby-stops', lat.toFixed(4), lon.toFixed(4)] : null,
+    () => api.nearbyStops(lat as number, lon as number), { ...swrOpts, revalidateOnFocus: false })
+}
+
 /** Revalidate every cached Paxen query. */
 export const revalidateAll = () => globalMutate(() => true)
 

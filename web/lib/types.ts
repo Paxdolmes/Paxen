@@ -14,7 +14,26 @@ export interface Place {
   lon: number
   source: 'manual' | 'pin' | 'saved' | 'inferred'
   confirmed: boolean
+  stops: ChosenStop[] // stations/stops the user chose for this place; [] = let Paxen choose
 }
+
+/** A station or stop near a place (GET /v1/places/nearby-stops), nearest first. */
+export interface NearbyStop {
+  stop_id: string
+  name: string
+  kind: 'station' | 'bus'
+  lat: number
+  lon: number
+  distance_m: number
+  walk_min: number
+  modes: string[]
+  lines: string[]
+  hub: string | null
+  indicator: string | null // bus stop letter, e.g. "Stop K"
+  towards: string | null
+}
+
+export type ChosenStop = Pick<NearbyStop, 'stop_id' | 'name' | 'kind' | 'lat' | 'lon' | 'walk_min' | 'hub' | 'modes' | 'lines' | 'indicator'>
 
 export interface PlaceSearchResult {
   name: string
@@ -102,6 +121,7 @@ export interface CommuteEvaluation {
   delta_min: number | null // usual route today vs personal baseline
   gain_min: number | null // minutes saved by the recommended route vs usual
   preference: Preference
+  chosen_stops_honoured: boolean // false: nothing runs via the user's chosen stations right now; all routes shown
   baseline: Baseline
   usual: RouteOption | null
   recommended: RouteOption | null

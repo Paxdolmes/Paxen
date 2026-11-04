@@ -136,7 +136,7 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
         ev.commute.window_end = w.end
         for (const key of ['origin', 'dest'] as const) {
           const src = ev.commute[key].label === 'home' ? b.home : ev.commute[key].label === 'work' ? b.work : null
-          if (src) ev.commute[key] = { ...ev.commute[key], name: src.name, lat: src.lat, lon: src.lon, source: src.source }
+          if (src) ev.commute[key] = { ...ev.commute[key], name: src.name, lat: src.lat, lon: src.lon, source: src.source, stops: src.stops ?? [] }
         }
       }
       return { ok: true }
@@ -148,6 +148,24 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
     }
     case 'GET /v1/places':
       return places()
+    case 'GET /v1/places/nearby-stops': {
+      const lat = Number(query.get('lat'))
+      const lon = Number(query.get('lon'))
+      const metres = (a: number, b: number) =>
+        Math.hypot((a - lat) * 111_320, (b - lon) * 111_320 * Math.cos((lat * Math.PI) / 180))
+      return SEARCH_INDEX.filter((p) => p.kind === 'station')
+        .map((p) => {
+          const distance_m = Math.round(metres(p.lat, p.lon))
+          const lines = (p.detail ?? '').split(' · ').filter(Boolean)
+          return {
+            stop_id: p.stop_id ?? p.name, name: p.name, kind: 'station' as const, lat: p.lat, lon: p.lon, distance_m,
+            walk_min: Math.max(1, Math.round((distance_m * 1.3) / 75)), modes: ['tube'], lines, hub: null,
+            indicator: null, towards: null,
+          }
+        })
+        .filter((s) => s.distance_m <= 1500)
+        .sort((a, b) => a.distance_m - b.distance_m)
+    }
     case 'GET /v1/commutes':
       return d.commutes.map((c) => c.commute)
     case 'GET /v1/dashboard':

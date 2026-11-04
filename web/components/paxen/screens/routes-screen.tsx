@@ -88,6 +88,11 @@ export function RoutesScreen({ dashboard, nav }: { dashboard: Dashboard | undefi
           <Text variant="headline" as="h2" className="text-pretty">
             {data.headline}
           </Text>
+          {data.chosen_stops_honoured === false && (
+            <Text variant="footnote" tone="watch" className="text-pretty">
+              Nothing is running from your chosen stations right now, so these routes use other stations.
+            </Text>
+          )}
           <Text variant="footnote" tone="secondary" tabular>
             {data.baseline.p50 != null ? `Normal: ${fmtMin(data.baseline.p50)} · ${data.baseline.label}` : 'Learning your routine'}
           </Text>

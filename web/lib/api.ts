@@ -1,5 +1,7 @@
 import type {
   Alert,
+  ChosenStop,
+  NearbyStop,
   Commute,
   CommuteEvaluation,
   Dashboard,
@@ -119,6 +121,7 @@ export interface PlaceIn {
   lat: number
   lon: number
   source: Place['source']
+  stops?: ChosenStop[]
 }
 
 export interface OnboardingIn {
@@ -175,6 +178,8 @@ export const api = {
   onboarding: (body: OnboardingIn) => request<unknown>('POST', '/v1/onboarding', body),
 
   searchPlaces: (q: string) => request<PlaceSearchResult[]>('GET', `/v1/places/search?q=${encodeURIComponent(q)}`),
+  nearbyStops: (lat: number, lon: number) =>
+    request<NearbyStop[]>('GET', `/v1/places/nearby-stops?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`),
   places: () => request<Place[]>('GET', '/v1/places'),
   patchPlace: (id: string, patch: Partial<Omit<Place, 'id'>>) => request<Place>('PATCH', `/v1/places/${id}`, patch),
   deletePlace: (id: string) => request<unknown>('DELETE', `/v1/places/${id}`),

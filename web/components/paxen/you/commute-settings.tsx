@@ -5,7 +5,7 @@ import { Briefcase, Home, Pencil, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { DAY_LABELS, fmtDays, PREFERENCE_LABELS, PREFERENCES } from '@/lib/format'
 import { revalidateAll } from '@/lib/hooks'
-import type { Commute, Place, PlaceSearchResult, Preference } from '@/lib/types'
+import type { ChosenStop, Commute, Place, PlaceSearchResult, Preference } from '@/lib/types'
 import { Button } from '../primitives/button'
 import { Card, Divider, Section } from '../primitives/card'
 import { ChoiceChip } from '../primitives/chip'
@@ -13,6 +13,7 @@ import { SelectField, SettingRow, Switch, TimeField } from '../primitives/contro
 import { ConfirmSheet, Sheet } from '../primitives/sheet'
 import { Text } from '../primitives/text'
 import { PlaceSearch } from '../place-search'
+import { StopPicker } from '../stop-picker'
 
 function uniquePlaces(commutes: Commute[]): Place[] {
   const map = new Map<string, Place>()
@@ -22,14 +23,22 @@ function uniquePlaces(commutes: Commute[]): Place[] {
 
 function PlaceEditor({ place, onClose }: { place: Place; onClose: () => void }) {
   const [sel, setSel] = useState<PlaceSearchResult | null>(null)
+  const [stops, setStops] = useState<ChosenStop[]>(place.stops ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const label = place.label === 'home' ? 'Home' : place.label === 'work' ? 'Work' : place.name
+  const pick = (p: PlaceSearchResult) => {
+    setSel(p)
+    setStops([]) // new address, new nearby stations
+  }
   const save = async () => {
-    if (!sel) return
     setSaving(true)
     setError(null)
     try {
-      await api.patchPlace(place.id, { name: sel.name, lat: sel.lat, lon: sel.lon, source: 'manual' })
+      await api.patchPlace(place.id, {
+        ...(sel ? { name: sel.name, lat: sel.lat, lon: sel.lon, source: 'manual' as const } : {}),
+        stops,
+      })
       await revalidateAll()
       onClose()
     } catch (e) {
@@ -38,22 +47,27 @@ function PlaceEditor({ place, onClose }: { place: Place; onClose: () => void }) 
       setSaving(false)
     }
   }
+  const lat = sel?.lat ?? place.lat
+  const lon = sel?.lon ?? place.lon
   return (
     <Sheet
       open
       onClose={onClose}
-      title={`Change ${place.label === 'home' ? 'Home' : place.label === 'work' ? 'Work' : place.name}`}
+      title={`${label}: address and stations`}
       footer={
-        <Button block onClick={save} disabled={!sel} loading={saving}>
+        <Button block onClick={save} loading={saving}>
           Save
         </Button>
       }
     >
-      <div className="flex flex-col gap-3">
-        <Text variant="footnote" tone="secondary">
-          Currently: {place.name}
-        </Text>
-        <PlaceSearch label="Search for a place" placeholder="Station, street or postcode" selected={sel} onSelect={setSel} />
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3">
+          <Text variant="footnote" tone="secondary">
+            {sel ? `New address: ${sel.name}` : `Address: ${place.name}`}
+          </Text>
+          <PlaceSearch label="Search for a new address" placeholder="Change address: postcode, street or station" selected={sel} onSelect={pick} />
+        </div>
+        <StopPicker lat={lat} lon={lon} value={stops} onChange={setStops} placeLabel={label.toLowerCase()} />
         {error && (
           <Text variant="footnote" tone="attention" role="alert">
             {error}
@@ -191,6 +205,9 @@ export function CommuteSettings({ commutes }: { commutes: Commute[] }) {
                     </Text>
                     <Text variant="footnote" tone="secondary" className="truncate">
                       {p.name}
+                    </Text>
+                    <Text variant="footnote" tone="tertiary" className="truncate">
+                      {p.stops?.length ? `Stations: ${p.stops.map((st) => st.name).join(', ')}` : 'Stations: Paxen chooses'}
                     </Text>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setEditPlace(p)} aria-label={`Edit ${p.name}`}>

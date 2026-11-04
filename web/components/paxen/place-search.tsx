@@ -63,7 +63,7 @@ export function PlaceSearch({
             </Text>
           ) : data && data.length === 0 ? (
             <Text variant="footnote" tone="secondary">
-              No matches for &ldquo;{term}&rdquo;. Try a station name or postcode.
+              No matches for &ldquo;{term}&rdquo;. Try a full postcode (e.g. E17 9PH), a street address or a station name.
             </Text>
           ) : (
             <ul className="flex flex-col gap-1.5" aria-label="Search results">
@@ -74,7 +74,10 @@ export function PlaceSearch({
                   <li key={`${p.name}-${p.lat}-${p.lon}`}>
                     <button
                       type="button"
-                      onClick={() => onSelect(p)}
+                      onClick={() => {
+                        onSelect(p)
+                        setQ('') // collapse the list; the chosen place shows below
+                      }}
                       aria-pressed={isSel}
                       className={cn(
                         'flex min-h-14 w-full items-center gap-3 rounded-px-md border px-4 py-2.5 text-left transition-colors',

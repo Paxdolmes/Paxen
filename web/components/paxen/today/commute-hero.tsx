@@ -49,6 +49,11 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
             {detail}
           </Text>
         )}
+        {evaluation.chosen_stops_honoured === false && (
+          <Text variant="footnote" tone="inherit" className="text-pretty opacity-90">
+            Nothing is running from your chosen stations right now, so these routes use other stations.
+          </Text>
+        )}
       </div>
 
       <div className="flex flex-col gap-5 p-5">

@@ -4,9 +4,10 @@ import { useState } from 'react'
 import { ArrowLeft, BellRing, Gauge, ShieldCheck } from 'lucide-react'
 import { api, tokenStore } from '@/lib/api'
 import { DAY_LABELS, PREFERENCE_LABELS, PREFERENCES } from '@/lib/format'
-import type { PlaceSearchResult, Preference } from '@/lib/types'
+import type { ChosenStop, PlaceSearchResult, Preference } from '@/lib/types'
 import { Wordmark } from '../app-header'
 import { PlaceSearch } from '../place-search'
+import { StopPicker } from '../stop-picker'
 import { Button } from '../primitives/button'
 import { ChoiceChip } from '../primitives/chip'
 import { TimeField } from '../primitives/controls'
@@ -93,8 +94,13 @@ function Welcome({ onStart, name, setName, busy, error }: {
 export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onDone: () => void }) {
   const [step, setStep] = useState<Step>(() => (tokenStore.get() ? 'home' : 'welcome'))
   const [name, setName] = useState('')
-  const [home, setHome] = useState<PlaceSearchResult | null>(null)
-  const [work, setWork] = useState<PlaceSearchResult | null>(null)
+  const [home, setHomePlace] = useState<PlaceSearchResult | null>(null)
+  const [work, setWorkPlace] = useState<PlaceSearchResult | null>(null)
+  const [homeStops, setHomeStops] = useState<ChosenStop[]>([])
+  const [workStops, setWorkStops] = useState<ChosenStop[]>([])
+  // A different place means a different set of nearby stations.
+  const setHome = (p: PlaceSearchResult) => { setHomePlace(p); setHomeStops([]) }
+  const setWork = (p: PlaceSearchResult) => { setWorkPlace(p); setWorkStops([]) }
   const [days, setDays] = useState([0, 1, 2, 3, 4])
   const [mStart, setMStart] = useState('08:00')
   const [mEnd, setMEnd] = useState('08:45')
@@ -128,8 +134,8 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
     try {
       await api.onboarding({
         name: name.trim() || undefined,
-        home: { label: 'home', name: home.name, lat: home.lat, lon: home.lon, source: 'manual' },
-        work: { label: 'work', name: work.name, lat: work.lat, lon: work.lon, source: 'manual' },
+        home: { label: 'home', name: home.name, lat: home.lat, lon: home.lon, source: 'manual', stops: homeStops },
+        work: { label: 'work', name: work.name, lat: work.lat, lon: work.lon, source: 'manual', stops: workStops },
         days,
         morning: { start: mStart, end: mEnd },
         evening: { start: eStart, end: eEnd },
@@ -182,7 +188,10 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                   Paxen only stores your places to ~10 m precision. You can edit or delete them any time.
                 </Text>
               </div>
-              <PlaceSearch label="Search for home" placeholder="Station, street or postcode" selected={home} onSelect={setHome} autoFocus />
+              <PlaceSearch label="Search for home" placeholder="Address, postcode or station" selected={home} onSelect={setHome} autoFocus />
+              {home && (
+                <StopPicker lat={home.lat} lon={home.lon} value={homeStops} onChange={setHomeStops} placeLabel="home" />
+              )}
             </section>
           )}
 
@@ -196,7 +205,10 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                   Paxen only stores your places to ~10 m precision. You can edit or delete them any time.
                 </Text>
               </div>
-              <PlaceSearch label="Search for work" placeholder="Station, street or postcode" selected={work} onSelect={setWork} autoFocus />
+              <PlaceSearch label="Search for work" placeholder="Address, postcode or station" selected={work} onSelect={setWork} autoFocus />
+              {work && (
+                <StopPicker lat={work.lat} lon={work.lon} value={workStops} onChange={setWorkStops} placeLabel="work" />
+              )}
             </section>
           )}
 
