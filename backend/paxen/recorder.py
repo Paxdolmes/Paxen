@@ -61,6 +61,19 @@ def record_statuses(s: Session, provider: Provider, now: datetime) -> dict[str, 
     return cats
 
 
+def queue_context(items) -> dict[int, tuple[int, int | None]]:
+    """id(arrival) -> (place in queue, seconds behind the train ahead), per stop/line/platform-or-direction."""
+    groups: dict[tuple, list] = defaultdict(list)
+    for a in items:
+        groups[(a.stop_id, a.line_id, a.platform or a.direction)].append(a)
+    out = {}
+    for g in groups.values():
+        g.sort(key=lambda a: a.time_to_station_s)
+        for i, a in enumerate(g):
+            out[id(a)] = (i + 1, a.time_to_station_s - g[i - 1].time_to_station_s if i else None)
+    return out
+
+
 def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime, cats: dict[str, str]) -> int:
     polled = naive_utc(now)
     try:
@@ -77,12 +90,14 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
                       latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw)
     s.add(raw)
     s.flush()
+    qc = queue_context(res.items)
     if res.items:
         s.execute(insert(Prediction), [dict(
             source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
             stop_id=stop_id, line_id=a.line_id, mode=a.mode, direction=a.direction, vehicle_id=a.vehicle_id,
             expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
             line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
+            queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1],
         ) for a in res.items])
     return len(res.items)
 
@@ -148,11 +163,13 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
     s.add(raw)
     s.flush()
     sampler.gc(now)
+    qc = queue_context(res.items)
     rows = [dict(
         source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
         stop_id=a.stop_id, line_id=a.line_id, mode=a.mode or mode, direction=a.direction, vehicle_id=a.vehicle_id,
         expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
         line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
+            queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1],
     ) for a in res.items
         if a.time_to_station_s <= NETWORK_MAX_LEAD_S
         and sampler.keep((a.stop_id, a.line_id, a.vehicle_id, a.direction), a.time_to_station_s, now)]

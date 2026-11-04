@@ -31,7 +31,7 @@ feature uses anything from after the prediction was made.
 2. For each test day D (the most recent `k` days, `k ≤ 7`): train on **all days before D**, test on **D only**.
    Never train on D or later.
 3. A run needs **at least 7 training days** before the first test day and **at least 3 test days**. Otherwise the
-   report says "not enough data" and nothing changes.
+   report says "not enough data", no model is active, and Paxen shows TfL's own numbers.
 4. **Metrics per test day:** mean absolute error (seconds), % within 2 minutes, and p10–p90 interval coverage.
    Also broken down by lead time (0–2, 2–5, 5–10, 10–20, 20+ min), line and peak/off-peak.
 

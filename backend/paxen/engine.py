@@ -187,10 +187,17 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
             arr = ctx.arrivals(leg.from_stop_id)
             if arr:
                 cands = []
+                from .recorder import queue_context
+
+                qc = queue_context(arr)  # same context the model was trained with
+                weekend = local(ctx.now).weekday() >= 5
                 for a in arr:
                     if a.line_id != leg.line_id or not _matches_direction(a, leg.direction):
                         continue
-                    p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, cat != GOOD)
+                    rank, gap = qc.get(id(a), (None, None))
+                    age = (ctx.now - aware(a.feed_timestamp)).total_seconds() if a.feed_timestamp else None
+                    p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, cat != GOOD,
+                                          category=cat, queue_rank=rank, gap_s=gap, feed_age_s=age, weekend=weekend)
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
                     if a.terminates_here:
                         when += timedelta(seconds=TERMINUS_TURNAROUND_S)

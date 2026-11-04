@@ -44,6 +44,24 @@ class Sample:
     disrupted: bool
     error_s: float  # observed - provider expected (positive = later than promised)
     quality: float = 1.0
+    # extra context known at prediction time (model v2)
+    category: str = "good"
+    queue_rank: int | None = None
+    gap_s: int | None = None
+    feed_age_s: float | None = None
+    method: str = "countdown_inferred"
+
+    @property
+    def day(self) -> str:
+        from .timeutil import local
+
+        return local(self.polled_at).strftime("%Y-%m-%d")
+
+    @property
+    def weekend(self) -> bool:
+        from .timeutil import local
+
+        return local(self.polled_at).weekday() >= 5
 
 
 def load_samples(s: Session, source: str, since: datetime | None = None, min_quality: float = 0.3,
@@ -59,6 +77,7 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
     q = (
         select(Prediction.id, Prediction.polled_at, Prediction.line_id, Prediction.stop_id, Prediction.tts_s,
                Prediction.expected_arrival, Prediction.line_category, Prediction.direction, Prediction.platform,
+               Prediction.queue_rank, Prediction.gap_s, Prediction.feed_ts,
                ObservedArrival.arrived_at, ObservedArrival.quality, ObservedArrival.method, ObservedArrival.direction)
         .join(ObservedArrival, (ObservedArrival.source == Prediction.source)
               & (ObservedArrival.stop_id == Prediction.stop_id)
@@ -72,7 +91,8 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
     if methods:
         q = q.where(ObservedArrival.method.in_(methods))
     best: dict[int, tuple] = {}
-    for pid, polled, line, stop, tts, exp, cat, p_dir, platform, arrived, quality, method, o_dir in s.execute(q):
+    for (pid, polled, line, stop, tts, exp, cat, p_dir, platform, rank_q, gap, feed_ts, arrived, quality, method,
+         o_dir) in s.execute(q):
         if method == "trackernet":
             b = bound_of(platform)
             if b and o_dir and b != o_dir:
@@ -84,8 +104,9 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
             continue  # vehicle id reused by a later trip: not the same journey
         rank = (1 if method == "trackernet" else 0, quality, -abs(err))
         if pid not in best or rank > best[pid][0]:
+            age = (polled - feed_ts).total_seconds() if feed_ts else None
             best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",
-                                      err, quality))
+                                      err, quality, cat or "good", rank_q, gap, age, method))
     out = [v[1] for v in best.values()]
     out.sort(key=lambda x: x.polled_at)
     return out
@@ -126,7 +147,7 @@ class CorrectionModel:
         }
         return cls(groups)
 
-    def predict(self, line: str, stop: str, lead_s: float, band: str, disrupted: bool) -> dict:
+    def predict(self, line: str, stop: str, lead_s: float, band: str, disrupted: bool, **_ctx) -> dict:
         """Return {bias_s, q10_s, q90_s, support}. With no data: zero adjustment and a lead-scaled interval."""
         spread = 20 + 0.08 * lead_s + (60 if disrupted else 0)
         est = {"mean": 0.0, "q10": -spread * 0.6, "q90": spread}
@@ -218,7 +239,8 @@ def model_kind(source: str) -> str:
     return f"arrival_correction:{source}"
 
 
-def active_model(s: Session, source: str = "sim") -> CorrectionModel:
+def active_model(s: Session, source: str = "sim"):
+    """The model the protocol promoted for this data source; with none active, no correction (TfL's numbers)."""
     mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source), ModelVersion.active.is_(True))
                    .order_by(ModelVersion.id.desc())).first()
     if not mv:
@@ -226,6 +248,9 @@ def active_model(s: Session, source: str = "sim") -> CorrectionModel:
     cached = _cache.get(source)
     if cached and cached[0] == mv.id:
         return cached[1]
-    m = CorrectionModel.from_params(mv.params, mv.id)
+    from .models import from_params
+
+    m = from_params(mv.params)
+    m.version = mv.id
     _cache[source] = (mv.id, m)
     return m

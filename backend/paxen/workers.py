@@ -104,8 +104,17 @@ def monitor_tick() -> int:
 
 
 def train_tick() -> dict:
+    """Model selection by the pre-registered rolling-day protocol (docs/model-evaluation.md)."""
+    from .evaluate import run
+
     with SessionLocal() as s:
-        res = train_and_maybe_promote(s, get_provider().name)
+        provider = get_provider()
+        if isinstance(provider, SimProvider):
+            res = train_and_maybe_promote(s, provider.name)  # the simulator keeps the quick demo behaviour
+        else:
+            rep = run(s, provider.name)
+            res = {"status": rep["status"], "winner": rep.get("winner"), "days": rep["days"],
+                   "ground_truth": rep.get("ground_truth"), "message": rep.get("message")}
         prune(s, utcnow())
         return res
 

@@ -150,6 +150,10 @@ class Prediction(Base):
     tts_s: Mapped[int] = mapped_column(Integer)
     line_category: Mapped[str] = mapped_column(String(20), default="good")
     platform: Mapped[str | None] = mapped_column(String(60))  # e.g. "Southbound - Platform 1"
+    # Context at prediction time, from the full board (before storage sampling): this train's place in the queue
+    # at this stop/platform (1 = next), and seconds behind the train ahead of it.
+    queue_rank: Mapped[int | None] = mapped_column(Integer)
+    gap_s: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (
         Index("ix_pred_vehicle", "source", "stop_id", "line_id", "vehicle_id", "polled_at"),
         Index("ix_pred_polled", "polled_at"),
@@ -233,7 +237,9 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("places", "preferred_stops", "JSON"),
                   ("trips", "plan", "JSON"),
                   ("trips", "status", "VARCHAR(20)"),
-                  ("predictions", "platform", "VARCHAR(60)")]
+                  ("predictions", "platform", "VARCHAR(60)"),
+                  ("predictions", "queue_rank", "INTEGER"),
+                  ("predictions", "gap_s", "INTEGER")]
 
 
 def init_db(eng=None) -> None:
