@@ -14,7 +14,7 @@ from __future__ import annotations
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def lead_bucket(lead_s: float) -> str:
     return "20m+"
 
 
-@dataclass
+@dataclass(slots=True)
 class Sample:
     polled_at: datetime
     line_id: str
@@ -67,12 +67,14 @@ class Sample:
 
 
 def load_samples(s: Session, source: str, since: datetime | None = None, min_quality: float = 0.3,
-                 methods: tuple[str, ...] | None = None, until: datetime | None = None) -> list[Sample]:
+                 methods: tuple[str, ...] | None = None, until: datetime | None = None,
+                 stride: int = 1) -> list[Sample]:
     """Pair each recorded prediction with the arrival it was predicting.
 
     Matching uses the vehicle id plus direction: for measured (Trackernet) arrivals the platform's bound
     ("southbound"), otherwise the destination. If both a measured and an inferred arrival match, the measured one
     wins. `methods` restricts which kinds of ground truth are used (e.g. only "trackernet").
+    `stride` > 1 keeps only every stride-th prediction (by id), sampled in the database to bound memory.
     """
     from .trackernet import bound_of
 
@@ -89,15 +91,23 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
         .where(Prediction.source == source, ObservedArrival.quality >= min_quality,
                Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S)
     )
+    # A vehicle id recurs many times a day at the same stop, so without an upper bound on the arrival every
+    # prediction pairs with every later visit of that vehicle (tens of millions of rows a day, which ran the
+    # worker out of memory). Pairs further apart than this are discarded below anyway.
+    max_gap = timedelta(seconds=MAX_LEAD_S + 900)
+    if s.get_bind().dialect.name == "postgresql":
+        q = q.where(ObservedArrival.arrived_at <= Prediction.polled_at + max_gap)
     if since:
         q = q.where(Prediction.polled_at >= naive_utc(since))
     if until:
-        q = q.where(Prediction.polled_at < naive_utc(until))
+        q = q.where(Prediction.polled_at < naive_utc(until), ObservedArrival.arrived_at < naive_utc(until) + max_gap)
     if methods:
         q = q.where(ObservedArrival.method.in_(methods))
+    if stride > 1:
+        q = q.where(Prediction.id % stride == 0)
     best: dict[int, tuple] = {}
     for (pid, polled, line, stop, tts, vehicle, exp, cat, p_dir, platform, rank_q, gap, feed_ts, arrived, quality,
-         method, o_dir) in s.execute(q):
+         method, o_dir) in s.execute(q.execution_options(yield_per=10_000)):
         if method == "trackernet":
             b = bound_of(platform)
             if b and o_dir and b != o_dir:

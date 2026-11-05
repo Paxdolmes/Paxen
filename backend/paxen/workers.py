@@ -119,11 +119,42 @@ def train_tick() -> dict:
         return res
 
 
-async def _loop(fn, interval: int, name: str):
+TRAIN_FIRST_DELAY_S = 600  # let the recorder run for a while after a (re)start before the first training run
+
+
+def _peak_mb() -> int | None:
+    try:
+        import resource
+
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024  # KB on Linux
+    except Exception:
+        return None
+
+
+def train_isolated() -> dict:
+    """Run train_tick in a child process. Training holds weeks of history in memory; if it is ever killed for
+    running out of memory, only the child dies and the recorder keeps recording (before this, an out-of-memory
+    kill took the whole worker down every 30 s, silently)."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run([sys.executable, "-m", "paxen.worker", "--train-once"])
+    if proc.returncode == 0:
+        return {"exit": 0}
+    if proc.returncode in (-9, 137):
+        log.error("training process was killed (signal 9, usually out of memory); recording continues")
+    else:
+        log.error("training process exited with code %s; recording continues", proc.returncode)
+    return {"exit": proc.returncode}
+
+
+async def _loop(fn, interval: int, name: str, first_delay: int = 0):
+    if first_delay:
+        await asyncio.sleep(first_delay)
     while True:
         try:
             res = await asyncio.to_thread(fn)
-            log.info("%s: %s", name, res)
+            log.info("%s: %s | peak memory %s MB", name, res, _peak_mb())
         except Exception:
             log.exception("%s failed", name)
         await asyncio.sleep(interval)
@@ -132,7 +163,8 @@ async def _loop(fn, interval: int, name: str):
 def start(loop_tasks: list) -> None:
     loop_tasks.append(asyncio.create_task(_loop(recorder_tick, settings.poll_interval_s, "recorder")))
     loop_tasks.append(asyncio.create_task(_loop(monitor_tick, settings.monitor_interval_s, "monitor")))
-    loop_tasks.append(asyncio.create_task(_loop(train_tick, settings.train_interval_s, "train")))
+    delay = 0 if settings.provider == "sim" else TRAIN_FIRST_DELAY_S
+    loop_tasks.append(asyncio.create_task(_loop(train_isolated, settings.train_interval_s, "train", first_delay=delay)))
     from .archive import get_archive
 
     try:

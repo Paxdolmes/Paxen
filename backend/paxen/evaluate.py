@@ -148,17 +148,21 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
 
 
 MAX_PER_DAY = 25_000  # memory guard: a fixed random sample of each day's training pairs
+PRESAMPLE = 4  # the database pre-sample keeps ~this many times MAX_PER_DAY predictions (not all have a match)
 
 
 def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: int = 0) -> list[Sample]:
-    """Load history one London day at a time, keeping at most MAX_PER_DAY pairs per day (same seed, same sample)."""
+    """Load history one London day at a time, keeping at most MAX_PER_DAY pairs per day (same seed, same sample).
+
+    Busy days are thinned in the database first (every n-th prediction by id), so memory stays bounded however
+    much the recorder stores: a full day of the whole Tube network is ~13 million predictions."""
     import random
     from datetime import timedelta
 
     from sqlalchemy import func, select
 
     from .db import Prediction
-    from .timeutil import LONDON, aware
+    from .timeutil import LONDON, aware, naive_utc
 
     lo, hi = s.execute(select(func.min(Prediction.polled_at), func.max(Prediction.polled_at))
                        .where(Prediction.source == source)).one()
@@ -169,7 +173,10 @@ def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: i
     out: list[Sample] = []
     while day <= end:
         nxt = (day + timedelta(days=1, hours=2)).replace(hour=0)  # DST-safe next local midnight
-        batch = load_samples(s, source, since=day, until=nxt, methods=methods)
+        n = s.scalar(select(func.count()).select_from(Prediction).where(
+            Prediction.source == source, Prediction.polled_at >= naive_utc(day), Prediction.polled_at < naive_utc(nxt)))
+        stride = max(1, (n or 0) // (MAX_PER_DAY * PRESAMPLE))
+        batch = load_samples(s, source, since=day, until=nxt, methods=methods, stride=stride)
         if len(batch) > MAX_PER_DAY:
             batch = random.Random(f"{seed}-{day.date()}").sample(batch, MAX_PER_DAY)
         out += batch

@@ -51,5 +51,21 @@ async def main() -> None:
         t.cancel()
 
 
+def train_once() -> None:
+    """One training run, in its own process (started by the worker; see workers.train_isolated)."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    log = logging.getLogger("paxen.train")
+    init_db()
+    res = workers.train_tick()
+    import resource
+
+    log.info("train: %s | peak memory %s MB", res, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+
+    if "--train-once" in sys.argv:
+        train_once()
+    else:
+        asyncio.run(main())
