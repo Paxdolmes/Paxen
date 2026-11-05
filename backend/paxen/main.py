@@ -8,7 +8,7 @@ import os
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -22,7 +22,7 @@ from .config import settings
 from .db import Alert, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
 from .engine import (
-    PREFERENCES, clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
+    clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
     set_usual,
 )
 from .insights import insights as build_insights

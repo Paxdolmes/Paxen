@@ -86,7 +86,7 @@ def test_terminus_duplicates_collapse_and_are_flagged():
 
 
 def test_terminating_train_counts_as_next_departure():
-    from datetime import datetime, timezone
+
     from paxen.engine import _matches_direction
     [a] = parse_arrivals(TERMINUS, "940GZZLUWWL")
     assert _matches_direction(a, "Brixton Underground Station")

@@ -44,7 +44,7 @@ def test_alerts_go_by_web_push_and_revoked_subscriptions_are_forgotten(session, 
     u = User(token_hash="p" * 64, web_push=SUB)
     session.add(u)
     session.flush()
-    alert = Alert(user_id=u.id, commute_id="c", kind="better_route", title="Slower today", body="Take the Weaver",
+    alert = Alert(user_id=u.id, commute_id=None, kind="better_route", title="Slower today", body="Take the Weaver",
                   confidence="high", data={"push_title": "YOUR COMMUTE IS SLOWER"})
     session.add(alert)
     session.flush()
