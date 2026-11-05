@@ -46,6 +46,7 @@ MAX_TRANSFER_MIN = 12.0  # the longest walks between platforms in one station (e
 HEADWAY_MULT = {GOOD: 1.0, MINOR: 1.4, SEVERE: 3.0, PART_SUSPENDED: 2.0}
 RIDE_MULT = {GOOD: 1.0, MINOR: 1.15, SEVERE: 1.6, PART_SUSPENDED: 1.3}
 RIDE_SD = {GOOD: 0.05, MINOR: 0.12, SEVERE: 0.3, PART_SUSPENDED: 0.25}
+RISK_COST_MIN = 15.0  # "reliable" preference: minutes a route is charged per unit chance of a new disruption
 PREFERENCES = ("balanced", "fastest", "reliable", "least_walking", "fewest_changes")
 
 # ------------------------------------------------------------------- network context
@@ -165,6 +166,8 @@ class JourneyForecast:
     model_support: int = 0
     reliability: dict | None = None
     score: float = 0.0
+    # chance a new disruption starts on one of the route's (currently good) Tube lines while you're on it
+    disruption_risk: float | None = None
 
     @property
     def signature(self) -> str:
@@ -259,6 +262,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     disruptions: dict[str, dict] = {}
     live_any, support, partial = False, 0, False
     band = hour_band(depart_at)
+    no_new: float | None = None  # chance no new disruption starts on any Tube leg, from TfL's status history
     for i, leg in enumerate(j.legs):
         before = j.legs[i - 1] if i else None
         if not leg.is_transit:
@@ -331,6 +335,10 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
         # not knowing whether it will have cleared is itself uncertainty
         extra = (base_headway * (HEADWAY_MULT.get(impact, 1.0) - 1) / 2
                  + leg.duration_min * (RIDE_MULT.get(impact, 1.0) - 1) + (8 if cat == PART_SUSPENDED else 0))
+        if cat == GOOD and getattr(ctx.provider, "name", "") == "tfl":
+            r = clearance.onset_risk(leg.line_id, board_at, board_at + timedelta(minutes=wait + ride))
+            if r is not None:
+                no_new = (1.0 if no_new is None else no_new) * (1 - r)
         t += wait + ride
         var += wait_sd ** 2 + ride_sd ** 2 + p_on * (1 - p_on) * extra ** 2
         legs.append(LegForecast(leg.mode, leg.line_id, leg.line_name, leg.from_name, leg.to_name, leg.direction,
@@ -352,7 +360,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
         journey=j, depart_at=depart_at, p10=round(p10, 1), p50=round(p50, 1), p90=round(p90, 1), feasible=feasible,
         confidence=conf if feasible else "low", legs=legs, on_time_chance=round(on_time, 2) if feasible else 0.0,
         disruptions=list(disruptions.values()), crowding=crowding_estimate(j, ctx, depart_at), live_data=live_any,
-        model_support=support,
+        model_support=support, disruption_risk=round(1 - no_new, 3) if no_new is not None else None,
     )
 
 
@@ -464,7 +472,8 @@ def score(f: JourneyForecast, preference: str) -> float:
     ch, walk = f.journey.changes, f.journey.walking_min
     return {
         "fastest": f.p50 + 0.1 * spread,
-        "reliable": f.p50 + 1.2 * spread + 2 * ch,
+        # a new disruption typically costs commuters well over 10 minutes; 15 is a judgment, not fitted
+        "reliable": f.p50 + 1.2 * spread + 2 * ch + RISK_COST_MIN * (f.disruption_risk or 0.0),
         "least_walking": f.p50 + 0.3 * spread + 1.0 * walk,
         "fewest_changes": f.p50 + 0.3 * spread + 8 * ch,
     }.get(preference, f.p50 + 0.5 * spread + 1.5 * ch + 0.2 * walk)

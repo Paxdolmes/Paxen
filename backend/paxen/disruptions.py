@@ -37,6 +37,7 @@ UNPLANNED = {"Minor Delays": "minor", "Severe Delays": "severe", "Part Suspended
              "Suspended": "suspended"}
 PLANNED_DESCRIPTIONS = {"part closure", "planned closure", "service closed", "special service"}
 GAP_S = 60
+MAX_MESSAGE = timedelta(hours=48)  # a single unplanned message can't really stand for longer
 
 CAUSES = [  # first match wins; "earlier" means the incident is over and the line is recovering
     ("earlier", r"\bearlier\b"),
@@ -103,6 +104,9 @@ def observations(rows: list[dict]) -> list[dict]:
             episode.clear()
 
         for r in rs:
+            if r["end"] < r["start"] or (r["status"] in UNPLANNED and r["end"] - r["start"] > MAX_MESSAGE):
+                close()  # recording glitches (e.g. a gap over Christmas 2024 left messages "on" for days)
+                continue
             if r["status"] not in UNPLANNED:
                 close()  # planned closure, service closed overnight, good service: not part of an incident
                 continue
@@ -127,11 +131,69 @@ def fit(obs: list[dict]) -> dict:
     return {k: {"n": len(v), "s": _survival(v), "median": round(statistics.median(v), 1)} for k, v in groups.items()}
 
 
+# TfL status-history line names -> Unified API line ids
+HISTORY_LINES = {"Bakerloo": ["bakerloo"], "C&H": ["circle", "hammersmith-city"], "Central": ["central"],
+                 "District": ["district"], "Jubilee": ["jubilee"], "Metropolitan": ["metropolitan"],
+                 "Northern": ["northern"], "Piccadilly": ["piccadilly"], "Victoria": ["victoria"],
+                 "Waterloo & City": ["waterloo-city"]}
+RECENT_DAYS = 365  # lines' disruption levels drift (Central's doubled 2023-2026): take the level from the last year
+
+
+def _day_type(d: datetime) -> str:
+    return "sat" if d.weekday() == 5 else "sun" if d.weekday() == 6 else "fri" if d.weekday() == 4 else "wd"
+
+
+def fit_onsets(obs: list[dict]) -> dict:
+    """How often a new disruption starts on each line, per hour. Level per line from the most recent year; the
+    shape over hour of day and day type from the whole history, pooled across lines (held-out checks: line and
+    hour predict the next year; season didn't, so it's left out)."""
+    starts = [o for o in obs if o["elapsed"] == 0]
+    first, last = min(o["at"] for o in starts), max(o["at"] for o in starts)
+    service_hours = lambda a, b: sum(1 for i in range(int((b - a).total_seconds() // 3600))  # noqa: E731
+                                     if ((a + timedelta(hours=i)).hour >= 5 or (a + timedelta(hours=i)).hour < 1))
+    recent_from = last - timedelta(days=RECENT_DAYS)
+    hrs_recent = service_hours(recent_from, last)
+    level = {}
+    for name, ids in HISTORY_LINES.items():
+        n = sum(1 for o in starts if o["line"] == name and o["at"] >= recent_from)
+        for lid in ids:
+            level[lid] = round(n / hrs_recent, 5)
+    # shape: starts per (day type, hour) relative to the average service hour
+    counts: dict[str, int] = defaultdict(int)
+    exposure: dict[str, int] = defaultdict(int)
+    t = first.replace(minute=0, second=0, microsecond=0)
+    while t < last:
+        if t.hour >= 5 or t.hour < 1:
+            exposure[f"{_day_type(t)}|{t.hour}"] += 1
+        t += timedelta(hours=1)
+    for o in starts:
+        counts[f"{_day_type(o['at'])}|{o['at'].hour}"] += 1
+    total = sum(counts.values()) / max(1, sum(exposure.values()))
+    shape = {k: round((counts[k] / exposure[k]) / total, 3) for k in exposure if exposure[k]}
+    return {"level_per_hour": level, "shape": shape, "recent_from": recent_from.date().isoformat()}
+
+
 # ====================================================================== using it
 class Clearance:
     def __init__(self, data: dict):
         self.groups = data["groups"]
         self.meta = data.get("meta", {})
+        self.onsets = data.get("onsets")
+
+    def onset_risk(self, line_id: str, start: datetime, end: datetime) -> float | None:
+        """Chance a new disruption starts on a line between start and end (London local times), or None if the
+        line isn't in the history (only Underground lines are)."""
+        if not self.onsets or line_id not in self.onsets["level_per_hour"] or end <= start:
+            return None
+        level = self.onsets["level_per_hour"][line_id]
+        survive, t = 1.0, start
+        while t < end:
+            step = min(end, (t + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)) - t
+            frac = step.total_seconds() / 3600
+            rate = level * self.onsets["shape"].get(f"{_day_type(t)}|{t.hour}", 0.0)
+            survive *= (1 - min(1.0, rate)) ** frac
+            t += step
+        return 1 - survive
 
     def _curve(self, category: str, cause: str, elapsed: float | None) -> list[float] | None:
         e = elapsed_bucket(elapsed)
@@ -176,6 +238,15 @@ def get(path: Path | None = None) -> Clearance | None:
     return _cache[p]
 
 
+def onset_risk(line_id: str | None, start: datetime, end: datetime) -> float | None:
+    from .timeutil import local
+
+    c = get()
+    if not c or not line_id:
+        return None
+    return c.onset_risk(line_id, local(start).replace(tzinfo=None), local(end).replace(tzinfo=None))
+
+
 def is_planned(description: str | None) -> bool:
     return (description or "").strip().lower() in PLANNED_DESCRIPTIONS
 
@@ -197,7 +268,7 @@ def build(csv_path: Path, out: Path = DATA_FILE) -> dict:
                                f"{min(o['at'] for o in obs):%d %b %Y} to {max(o['at'] for o in obs):%d %b %Y}",
                      "observations": len(obs), "horizons_min": HORIZONS,
                      "built": datetime.now().date().isoformat()},
-            "groups": fit(obs)}
+            "groups": fit(obs), "onsets": fit_onsets(obs)}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")))
     _cache.pop(str(out), None)
