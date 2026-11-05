@@ -111,9 +111,11 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
   switch (route) {
     case 'GET /v1/me':
       return d.user
-    case 'PATCH /v1/me':
-      d.user = { ...d.user, ...(body as Partial<User>) }
+    case 'PATCH /v1/me': {
+      const { push_token, ...rest } = body as Partial<User> & { push_token?: string | null }
+      d.user = { ...d.user, ...rest, ...(push_token !== undefined ? { push_enabled: !!push_token } : {}) }
       return d.user
+    }
     case 'POST /v1/push/subscribe':
       d.user = { ...d.user, push_enabled: true }
       return d.user
