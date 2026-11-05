@@ -10,6 +10,7 @@
 | Bus Open Data Service (SIRI-VM) | bus vehicle positions → better ground truth | not yet | coverage in the pilot corridor; matching to TfL vehicle ids |
 | TfL NUMBAT 2025 (crowding.data.tfl.gov.uk) | scheduled trains per hour for waits without a countdown; typical demand features for the `gbm_numbat` candidate | implemented (`numbat.py`, data file committed) | rebuild yearly when TfL publishes a new edition; see [historical-data.md](historical-data.md) |
 | TfL Journey Planner timetabled departures | waits on services 8+ min apart; walk time when changing trains | implemented (`engine.timetable_wait`, `transfer_min`) | change walks are a heuristic from the planner's connection time |
+| TfL trains service status messages (Apr 2022 - Oct 2026) | how likely a current disruption is to still be on when you travel | implemented (`disruptions.py`, derived curves committed) | confirm licence; rebuild when a newer export is available |
 | TfL station crowding (`/crowding`) | station busyness | implemented | only ever shown as an estimate |
 
 **Ground truth.** Today it is inferred from countdowns: a vehicle that was ≤2 min away and then disappeared

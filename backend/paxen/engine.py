@@ -23,8 +23,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import disruptions as clearance
 from . import numbat
-from .db import Alert, Commute, Trip, User
+from .db import Alert, Commute, LineStatusSnapshot, Trip, User
 from .domain import (
     Leg, DEFAULT_HEADWAY_MIN, GOOD, MINOR, PART_SUSPENDED, SEVERE, SUSPENDED, Arrival, Journey, LineStatus,
 )
@@ -75,7 +76,21 @@ class NetworkContext:
     statuses: dict[str, LineStatus]
     model: CorrectionModel
     feed_fresh: bool = True
+    disrupted_since: dict[str, datetime] = field(default_factory=dict)  # line -> when its disruption began
     _arrivals: dict[str, list[Arrival] | None] = field(default_factory=dict)
+
+    def chance_still_on(self, line_id: str | None, category: str, when: datetime) -> float:
+        """Chance a disruption showing now still applies at `when` (TfL's status history, paxen.disruptions).
+        Planned closures, and anything not from TfL (the simulator's scenarios), count as certain."""
+        if category == GOOD:
+            return 0.0
+        st = self.statuses.get(line_id or "")
+        if not st or getattr(self.provider, "name", "") != "tfl":
+            return 1.0
+        since = self.disrupted_since.get(line_id or "")
+        elapsed = (self.now - since).total_seconds() / 60 if since else None
+        ahead = max(0.0, (when - self.now).total_seconds() / 60)
+        return clearance.p_ongoing(category, st.description, st.reason, elapsed, ahead)
 
     def prefetch(self, stop_ids: set[str]) -> None:
         """Fetch live arrivals for many stops in parallel (one evaluation touches several boarding stops)."""
@@ -170,6 +185,31 @@ def _matches_direction(a: Arrival, leg_direction: str | None) -> bool:
     return a.direction.lower() in d or d in a.direction.lower() or a.destination.lower() in d
 
 
+def disruption_starts(s: Session, source: str, statuses: dict[str, LineStatus], now: datetime) -> dict[str, datetime]:
+    """When each currently disrupted line's disruption began, from the recorder's status snapshots (last 24 h)."""
+    from sqlalchemy import func
+
+    out: dict[str, datetime] = {}
+    since = naive_utc(now - timedelta(hours=24))
+    try:
+        for lid, st in statuses.items():
+            if st.category == GOOD:
+                continue
+            base = (LineStatusSnapshot.source == source, LineStatusSnapshot.line_id == lid,
+                    LineStatusSnapshot.polled_at >= since)
+            last_good = s.scalar(select(func.max(LineStatusSnapshot.polled_at)).where(
+                *base, LineStatusSnapshot.category == GOOD))
+            q = select(func.min(LineStatusSnapshot.polled_at)).where(*base, LineStatusSnapshot.category != GOOD)
+            if last_good:
+                q = q.where(LineStatusSnapshot.polled_at > last_good)
+            first = s.scalar(q)
+            if first:
+                out[lid] = aware(first)
+    except Exception:  # history is a refinement: never let it break a forecast
+        return {}
+    return out
+
+
 def scheduled_headway(leg: Leg, when: datetime) -> tuple[float, str]:
     """(minutes between trains that run this leg, source). TfL's scheduled frequency for that day and time
     (NUMBAT, the least-served link of the leg, so a branch's own service counts) beats a flat guess per mode."""
@@ -228,21 +268,26 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                                     0.08 * leg.duration_min, False, GOOD))
             continue
         cat = ctx.leg_category(leg)
+        # A disruption now weighs on this leg as much as it's likely to still be on when you get there.
+        p_on = ctx.chance_still_on(leg.line_id, cat, depart_at + timedelta(minutes=t))
         if cat != GOOD:
             st = ctx.statuses[leg.line_id]
             disruptions[leg.line_id] = {"line_id": leg.line_id, "line_name": st.line_name, "category": cat,
-                                        "description": st.description, "reason": st.reason}
-        if cat == SUSPENDED:
+                                        "description": st.description, "reason": st.reason,
+                                        "chance_still_on": round(p_on, 2)}
+        likely = cat if p_on >= 0.5 else GOOD
+        if likely == SUSPENDED:
             feasible = False
-        partial |= cat == PART_SUSPENDED
+        partial |= likely == PART_SUSPENDED
+        impact = SEVERE if cat == SUSPENDED else cat  # a suspension expected to lift: allow for severe delays
         base_headway, basis = scheduled_headway(leg, depart_at + timedelta(minutes=t))
         change = 0.0 if leg.headway_min else transfer_min(before, leg, base_headway)
         t += change
         var += (0.15 * change) ** 2
         board_at = depart_at + timedelta(minutes=t)
-        headway = base_headway * HEADWAY_MULT.get(cat, 1.0)
+        headway = base_headway * (1 + p_on * (HEADWAY_MULT.get(impact, 1.0) - 1))
         wait, wait_sd, live, upcoming = headway / 2, headway / math.sqrt(12), False, []
-        timed = timetable_wait(leg, board_at, base_headway, cat, headway_known=basis != "typical")
+        timed = timetable_wait(leg, board_at, base_headway, likely, headway_known=basis != "typical")
         if timed:
             (wait, wait_sd), basis = timed, "timetable"
         if (board_at - ctx.now) <= timedelta(minutes=LIVE_HORIZON_MIN) and cat != SUSPENDED:
@@ -278,13 +323,16 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                         live, support, basis = True, max(support, p["support"]), "live"
                         break
         live_any |= live
-        ride = leg.duration_min * RIDE_MULT.get(cat, 1.0)
-        ride_sd = ride * RIDE_SD.get(cat, 0.05)
+        ride = leg.duration_min * (1 + p_on * (RIDE_MULT.get(impact, 1.0) - 1))
+        ride_sd = ride * (RIDE_SD[GOOD] + p_on * (RIDE_SD.get(impact, 0.05) - RIDE_SD[GOOD]))
         if cat == PART_SUSPENDED:
-            ride += 8
-            ride_sd += 6
+            ride += 8 * p_on
+            ride_sd += 6 * p_on
+        # not knowing whether it will have cleared is itself uncertainty
+        extra = (base_headway * (HEADWAY_MULT.get(impact, 1.0) - 1) / 2
+                 + leg.duration_min * (RIDE_MULT.get(impact, 1.0) - 1) + (8 if cat == PART_SUSPENDED else 0))
         t += wait + ride
-        var += wait_sd ** 2 + ride_sd ** 2
+        var += wait_sd ** 2 + ride_sd ** 2 + p_on * (1 - p_on) * extra ** 2
         legs.append(LegForecast(leg.mode, leg.line_id, leg.line_name, leg.from_name, leg.to_name, leg.direction,
                                 round(wait, 1), round(ride, 1), round(math.sqrt(wait_sd ** 2 + ride_sd ** 2), 2),
                                 live, cat, upcoming, basis, change))
@@ -564,7 +612,8 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     preference = preference or commute.preference or "balanced"
     depart_at = depart_at or default_depart_at(commute, now)
     statuses = current_statuses(provider, now)
-    ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name), feed_fresh)
+    ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name), feed_fresh,
+                         disruption_starts(s, provider.name, statuses, now))
     o, d = commute.origin, commute.dest
     try:
         journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
