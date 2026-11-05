@@ -54,6 +54,12 @@ def record_statuses(s: Session, provider: Provider, now: datetime) -> dict[str, 
         return {}
     s.add(RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
                       latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw))
+    try:  # the permanent, compact status history (one row per change); never let it stop recording
+        from .context import record_status_changes
+
+        record_status_changes(s, res.items, now)
+    except Exception as e:
+        log.warning("status history not recorded: %s", e)
     cats = {}
     for st in res.items:
         cats[st.line_id] = st.category
@@ -404,6 +410,9 @@ def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None
             synchronize_session=False)
         s.query(LineStatusSnapshot).filter(LineStatusSnapshot.polled_at < old).delete(synchronize_session=False)
         s.query(RawSnapshot).filter(RawSnapshot.polled_at < old).delete(synchronize_session=False)
+        from .db import StationCrowding
+
+        s.query(StationCrowding).filter(StationCrowding.polled_at < old).delete(synchronize_session=False)
     cutoff = naive_utc(now - timedelta(days=KEEP_RAW_PAYLOAD_DAYS))
     s.query(RawSnapshot).filter(RawSnapshot.polled_at < cutoff, RawSnapshot.payload.is_not(None)).update(
         {RawSnapshot.payload: None}, synchronize_session=False)

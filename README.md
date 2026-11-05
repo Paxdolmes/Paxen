@@ -66,6 +66,7 @@ cd backend && pytest -q
 | `PAXEN_POLL_INTERVAL` | `30` | seconds between feed polls |
 | `PAXEN_SIM_SCENARIO` | `auto` | `auto`, `normal`, `victoria-severe`, `victoria-suspended`, `central-minor`, `weaver-suspended`, `mixed` |
 | `PAXEN_CORS_ORIGINS` | `*` | comma-separated allowed origins |
+| `PAXEN_CONTEXT_INTERVAL` | `300` | seconds between live-context recordings (weather, station disruptions, lifts, planned works, crowding); `0` = off |
 
 Deploying (Railway + Vercel, step by step): [docs/deploy.md](docs/deploy.md).
 

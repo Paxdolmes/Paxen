@@ -203,6 +203,46 @@ class WatchedStop(Base):
     last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class ContextEvent(Base):
+    """A run of something seen in the live context: a line status, station disruption, lift outage or planned
+    works. One row per run (first seen to last seen), so it can be kept permanently. See paxen/context.py."""
+    __tablename__ = "context_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    key: Mapped[str] = mapped_column(String(220))
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)
+    line_id: Mapped[str | None] = mapped_column(String(40))
+    stop_id: Mapped[str | None] = mapped_column(String(40))
+    category: Mapped[str | None] = mapped_column(String(40))
+    summary: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[dict | None] = mapped_column(JSON)
+    __table_args__ = (Index("ix_ctx_kind_key", "kind", "key", "last_seen"), Index("ix_ctx_first", "first_seen"),
+                      Index("ix_ctx_kind_line", "kind", "line_id", "last_seen"))
+
+
+class WeatherHour(Base):
+    """Hourly central-London weather (Open-Meteo), kept permanently: tiny, and needed to learn weather effects."""
+    __tablename__ = "weather_hours"
+    hour: Mapped[str] = mapped_column(String(13), primary_key=True)  # YYYY-MM-DDTHH, London time
+    temp_c: Mapped[float | None] = mapped_column(Float)
+    precip_mm: Mapped[float | None] = mapped_column(Float)
+    snow_cm: Mapped[float | None] = mapped_column(Float)
+    gust_kmh: Mapped[float | None] = mapped_column(Float)
+    humidity: Mapped[float | None] = mapped_column(Float)
+    weather_code: Mapped[int | None] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class StationCrowding(Base):
+    """TfL's live busyness at a Tube station (share of its usual peak), every 15 minutes."""
+    __tablename__ = "station_crowding"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    polled_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    stop_id: Mapped[str] = mapped_column(String(40))
+    pct_of_baseline: Mapped[float] = mapped_column(Float)
+
+
 class AirQualityDay(Base):
     """TfL's London air-quality band, one row per day: the history behind 'today vs usual'."""
     __tablename__ = "air_quality_days"
