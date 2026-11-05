@@ -25,7 +25,7 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative h-8 w-13 shrink-0 rounded-full transition-colors disabled:opacity-50',
+        "relative h-8 w-13 shrink-0 rounded-full transition-colors before:absolute before:-inset-x-1 before:-inset-y-2 before:content-[''] disabled:opacity-50",
         checked ? 'bg-px-brand' : 'bg-px-border-strong',
       )}
     >
@@ -86,7 +86,7 @@ export function Stepper({
   label: string
 }) {
   const btn =
-    'flex size-10 items-center justify-center rounded-full bg-px-surface-sunken text-px-text transition-colors hover:bg-px-border disabled:opacity-40'
+    'flex size-11 items-center justify-center rounded-full bg-px-surface-sunken text-px-text transition-colors hover:bg-px-border disabled:opacity-40'
   return (
     <div className="flex shrink-0 items-center gap-2" role="group" aria-label={label}>
       <button type="button" className={btn} onClick={() => onChange(value - 1)} disabled={value <= min} aria-label={`Decrease ${label}`}>
