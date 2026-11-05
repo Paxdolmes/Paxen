@@ -67,7 +67,8 @@ def _predict(model, samples: list[Sample]) -> list[dict]:
     if hasattr(model, "predict_many"):
         return model.predict_many(samples)
     return [model.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, category=x.category,
-                          queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend)
+                          queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend,
+                          bound=x.bound, polled_at=x.polled_at)
             for x in samples]
 
 
@@ -88,7 +89,8 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
     report: dict = {"days": len(days), "samples": len(samples), "rules": {
         "min_train_days": MIN_TRAIN_DAYS, "min_test_days": MIN_TEST_DAYS, "mae_gain": MAE_GAIN,
         "win_share": WIN_SHARE, "coverage": COVERAGE, "decision_buckets": DECISION_BUCKETS,
-        "amendments": ["A1.1 purge", "A1.2 decision-horizon MAE", "A1.3 conformalized intervals"]}}
+        "amendments": ["A1.1 purge", "A1.2 decision-horizon MAE", "A1.3 conformalized intervals",
+                       "A2 gbm_numbat candidate (TfL NUMBAT 2025 service and demand)"]}}
     n_test = min(MAX_TEST_DAYS, len(days) - MIN_TRAIN_DAYS)
     if n_test < MIN_TEST_DAYS:
         report.update(status="not_enough_data", winner=None,

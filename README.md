@@ -70,3 +70,16 @@ cd backend && pytest -q
 Deploying (Railway + Vercel, step by step): [docs/deploy.md](docs/deploy.md).
 
 See [docs/product.md](docs/product.md) for how the brief maps to the code, and what was added or cut.
+
+## Historical data
+TfL's NUMBAT 2025 (typical-day train frequencies and demand) is bundled in `backend/paxen/data/`. It times the waits in
+journey forecasts when there's no live countdown, and feeds the `gbm_numbat` model candidate. Which historical
+datasets were assessed, and the live check behind it: [docs/historical-data.md](docs/historical-data.md).
+
+```bash
+cd backend
+python -m paxen.numbat build   # rebuild the NUMBAT file from TfL's open data (needs TFL_APP_KEY)
+python -m paxen.waitcheck      # check no-countdown waits against live TfL arrivals right now
+```
+
+Contains public sector information licensed under the Open Government Licence. Powered by TfL Open Data.

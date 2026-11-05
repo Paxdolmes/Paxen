@@ -68,6 +68,10 @@ export interface Leg {
   wait_min: number // forecast wait at the boarding stop
   ride_min: number // walking legs: walk time
   live: boolean // wait is based on live arrivals (+ correction model)
+  // where the wait came from: live countdown, the timetabled departure (services 8+ min apart), TfL's scheduled
+  // trains per hour (NUMBAT), or a flat guess for the mode. null for walking legs.
+  wait_basis?: "live" | "timetable" | "frequency" | "typical" | null
+  transfer_min?: number // walk to this leg's platform when changing trains within a station (before wait_min)
   status: LineCategory
   next_departures_min: number[] // relative to when you reach the stop
   path?: [number, number][] | null // route shape (lat, lon); included by /compare and live trips
