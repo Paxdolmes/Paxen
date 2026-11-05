@@ -4,7 +4,8 @@ Every candidate has the same interface:
     fit(samples) -> model
     predict(line, stop, lead_s, band, disrupted, **ctx) -> {"bias_s", "q10_s", "q90_s", "support"}
     to_params() / from_params(params)
-where ctx may hold: category, queue_rank, gap_s, feed_age_s, weekend. Unknown context is simply ignored.
+where ctx may hold: category, queue_rank, gap_s, feed_age_s, weekend, bound (the platform's direction) and
+polled_at (when the prediction was made). Unknown context is simply ignored.
 """
 from __future__ import annotations
 
@@ -12,10 +13,12 @@ import base64
 import io
 import statistics
 from collections import defaultdict
+from datetime import timedelta
 
 from .forecast import CorrectionModel, Sample, _quantile, lead_bucket
 
-SIMPLICITY = {"provider": 0, "hier": 1, "hier_ctx": 2, "gbm": 3}
+SIMPLICITY = {"provider": 0, "hier": 1, "hier_ctx": 2, "gbm": 3, "gbm_numbat": 4}
+CTX_KEYS = ("category", "queue_rank", "gap_s", "feed_age_s", "weekend", "bound", "polled_at")
 
 
 class ProviderModel:
@@ -112,6 +115,7 @@ class GBMModel:
     kind = "gbm"
     MAX_TRAIN = 300_000
     MAX_STOPS = 250  # most frequent stops get their own category; the rest share one
+    CATEGORICAL = [False, True, True, True, False, False, False, True, True]  # one flag per feature column
 
     def __init__(self, models=None, lines=None, stops=None, keep=None):
         self.models, self.lines, self.stops = models or {}, lines or [], stops or []
@@ -120,7 +124,7 @@ class GBMModel:
         self.keep = keep
 
     def _row(self, line, stop, lead_s, band, disrupted, category=None, queue_rank=None, gap_s=None,
-             feed_age_s=None, weekend=None):
+             feed_age_s=None, weekend=None, **_):
         nan = float("nan")
         return [
             float(lead_s), BANDS.index(band) if band in BANDS else nan, 1.0 if weekend else 0.0,
@@ -130,6 +134,13 @@ class GBMModel:
             self.lines.index(line) if line in self.lines else nan,
             self.stops.index(stop) if stop in self.stops else len(self.stops),
         ]
+
+    def _sample_row(self, x: Sample) -> list[float]:
+        return self._row(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, x.category, x.queue_rank, x.gap_s,
+                         x.feed_age_s, x.weekend, bound=x.bound, polled_at=x.polled_at)
+
+    def _ctx_row(self, line, stop, lead_s, band, disrupted, ctx: dict) -> list[float]:
+        return self._row(line, stop, lead_s, band, disrupted, **{k: ctx.get(k) for k in CTX_KEYS})
 
     @classmethod
     def fit(cls, samples: list[Sample], seed: int = 0) -> "GBMModel":
@@ -147,10 +158,9 @@ class GBMModel:
         m = cls(None, lines, stops)
         import numpy as np
 
-        X = np.array([m._row(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, x.category, x.queue_rank, x.gap_s,
-                             x.feed_age_s, x.weekend) for x in samples], dtype=float)
+        X = np.array([m._sample_row(x) for x in samples], dtype=float)
         y = np.array([x.error_s for x in samples], dtype=float)
-        categorical = [False, True, True, True, False, False, False, True, True]
+        categorical = list(cls.CATEGORICAL)
         m.keep = [i for i in range(X.shape[1]) if not np.isnan(X[:, i]).all()]
         X, categorical = X[:, m.keep], [categorical[i] for i in m.keep]
         m.models = {}
@@ -164,8 +174,7 @@ class GBMModel:
     def predict(self, line, stop, lead_s, band, disrupted, **ctx) -> dict:
         import numpy as np
 
-        row = np.array([self._row(line, stop, lead_s, band, disrupted, **{k: ctx.get(k) for k in
-                        ("category", "queue_rank", "gap_s", "feed_age_s", "weekend")})], dtype=float)
+        row = np.array([self._ctx_row(line, stop, lead_s, band, disrupted, ctx)], dtype=float)
         if self.keep is not None:
             row = row[:, self.keep]
         q10, q50, q90 = (float(self.models[n].predict(row)[0]) for n in ("q10", "q50", "q90"))
@@ -176,8 +185,7 @@ class GBMModel:
 
         if not samples:
             return []
-        X = np.array([self._row(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, x.category, x.queue_rank,
-                                x.gap_s, x.feed_age_s, x.weekend) for x in samples], dtype=float)
+        X = np.array([self._sample_row(x) for x in samples], dtype=float)
         if self.keep is not None:
             X = X[:, self.keep]
         q = {n: self.models[n].predict(X) for n in ("q10", "q50", "q90")}
@@ -199,7 +207,35 @@ class GBMModel:
         return cls(pickle.loads(base64.b64decode(p["blob"])), p.get("lines", []), p.get("stops", []), p.get("keep"))
 
 
-CANDIDATES = {"provider": ProviderModel, "hier": HierModel, "hier_ctx": HierCtxModel, "gbm": GBMModel}
+class GBMNumbatModel(GBMModel):
+    """`gbm` plus typical service and demand from TfL's NUMBAT where the train is arriving (Amendment 2):
+    scheduled headway, gap ahead relative to it, boarders+alighters per train, passengers on board."""
+    kind = "gbm_numbat"
+    CATEGORICAL = GBMModel.CATEGORICAL + [False, False, False, False]
+
+    @staticmethod
+    def _numbat(line, stop, lead_s, gap_s, bound, polled_at) -> list[float]:
+        from . import numbat
+
+        nan = float("nan")
+        c = numbat.stop_context(line, stop, bound, polled_at + timedelta(seconds=float(lead_s))) if polled_at else None
+        if not c:
+            return [nan, nan, nan, nan]
+        h = c["sched_headway_s"]
+        return [h, float(gap_s) / h if gap_s is not None and h else nan,
+                nan if c["activity_per_train"] is None else c["activity_per_train"],
+                nan if c["load_per_train"] is None else c["load_per_train"]]
+
+    def _sample_row(self, x: Sample) -> list[float]:
+        return super()._sample_row(x) + self._numbat(x.line_id, x.stop_id, x.lead_s, x.gap_s, x.bound, x.polled_at)
+
+    def _ctx_row(self, line, stop, lead_s, band, disrupted, ctx: dict) -> list[float]:
+        return super()._ctx_row(line, stop, lead_s, band, disrupted, ctx) + self._numbat(
+            line, stop, lead_s, ctx.get("gap_s"), ctx.get("bound"), ctx.get("polled_at"))
+
+
+CANDIDATES = {"provider": ProviderModel, "hier": HierModel, "hier_ctx": HierCtxModel, "gbm": GBMModel,
+              "gbm_numbat": GBMNumbatModel}
 
 COVERAGE_TARGET = 0.8  # p10-p90
 MIN_BUCKET_SCORES = 50
@@ -209,7 +245,8 @@ def _predict_all(model, samples: list[Sample]) -> list[dict]:
     if hasattr(model, "predict_many"):
         return model.predict_many(samples)
     return [model.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, category=x.category,
-                          queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend)
+                          queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend,
+                          bound=x.bound, polled_at=x.polled_at)
             for x in samples]
 
 

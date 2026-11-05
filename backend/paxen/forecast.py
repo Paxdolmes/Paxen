@@ -52,6 +52,7 @@ class Sample:
     method: str = "countdown_inferred"
     arrived_at: datetime | None = None  # the outcome's time (for purging at split boundaries)
     event: str | None = None  # which arrival this prediction was about (stop|line|vehicle|time)
+    bound: str | None = None  # the platform's direction ("westbound"), when its name gives one (Amendment 2)
 
     @property
     def day(self) -> str:
@@ -122,7 +123,7 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
             age = (polled - feed_ts).total_seconds() if feed_ts else None
             best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",
                                       err, quality, cat or "good", rank_q, gap, age, method, aware(arrived),
-                                      f"{stop}|{line}|{vehicle}|{arrived:%Y%m%d%H%M%S}"))
+                                      f"{stop}|{line}|{vehicle}|{arrived:%Y%m%d%H%M%S}", bound_of(platform)))
     out = [v[1] for v in best.values()]
     out.sort(key=lambda x: x.polled_at)
     return out

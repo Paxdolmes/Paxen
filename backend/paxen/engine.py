@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import numbat
 from .db import Alert, Commute, Trip, User
 from .domain import (
     Leg, DEFAULT_HEADWAY_MIN, GOOD, MINOR, PART_SUSPENDED, SEVERE, SUSPENDED, Arrival, Journey, LineStatus,
@@ -31,8 +32,16 @@ from .forecast import CorrectionModel, active_model
 from .providers.base import Provider
 from .recorder import watch_stops
 from .timeutil import aware, hour_band, in_window, local, minutes_of_day, naive_utc, parse_hhmm
+from .trackernet import bound_of
 
 LIVE_HORIZON_MIN = 25
+# Without a live countdown, services at least this far apart are timed from TfL's timetable (the planner's scheduled
+# departure); on more frequent ones which train you catch is down to chance, so the wait is half the headway.
+TIMETABLE_MIN_HEADWAY = 8.0
+TIMETABLE_SIGMA_MIN = 1.5  # spread of a train's actual departure, and of when you reach the platform, vs the plan
+# London's buses and trams are run to keep even gaps rather than to the minute of a timetable.
+HEADWAY_MANAGED_MODES = {"bus", "tram"}
+MAX_TRANSFER_MIN = 12.0  # the longest walks between platforms in one station (e.g. main line to Elizabeth line)
 HEADWAY_MULT = {GOOD: 1.0, MINOR: 1.4, SEVERE: 3.0, PART_SUSPENDED: 2.0}
 RIDE_MULT = {GOOD: 1.0, MINOR: 1.15, SEVERE: 1.6, PART_SUSPENDED: 1.3}
 RIDE_SD = {GOOD: 0.05, MINOR: 0.12, SEVERE: 0.3, PART_SUSPENDED: 0.25}
@@ -118,6 +127,10 @@ class LegForecast:
     live: bool
     category: str
     next_departures_min: list[float] = field(default_factory=list)
+    # where the wait came from: "live" countdown, "timetable" (scheduled departure), "frequency" (TfL's scheduled
+    # trains per hour, from NUMBAT) or "typical" (a flat guess for the mode, when nothing better is known)
+    wait_basis: str = "typical"
+    transfer_min: float = 0.0  # walking to this leg's platform when changing trains within a station
 
 
 @dataclass
@@ -157,6 +170,47 @@ def _matches_direction(a: Arrival, leg_direction: str | None) -> bool:
     return a.direction.lower() in d or d in a.direction.lower() or a.destination.lower() in d
 
 
+def scheduled_headway(leg: Leg, when: datetime) -> tuple[float, str]:
+    """(minutes between trains that run this leg, source). TfL's scheduled frequency for that day and time
+    (NUMBAT, the least-served link of the leg, so a branch's own service counts) beats a flat guess per mode."""
+    if leg.headway_min:
+        return leg.headway_min, "frequency"  # the provider knows its own service (the simulator)
+    h = numbat.headway_min(leg.line_id, leg.stop_ids, when)
+    if h:
+        return h, "frequency"
+    return DEFAULT_HEADWAY_MIN.get(leg.mode, 8.0), "typical"
+
+
+def timetable_wait(leg: Leg, board_at: datetime, headway: float, category: str,
+                   headway_known: bool = True) -> tuple[float, float] | None:
+    """(expected wait, sd) in minutes from the planner's scheduled departure, for services far enough apart that the
+    timetable decides which train you get. Allows for just missing it (then the next is about a headway later).
+    None when the timetable doesn't apply: frequent service, disruption, or the scheduled train isn't the next one.
+    With no known frequency (National Rail: NUMBAT doesn't cover it), the planner's next train is the best guess."""
+    if (category != GOOD or headway < TIMETABLE_MIN_HEADWAY or not leg.departure or leg.headway_min
+            or leg.mode in HEADWAY_MANAGED_MODES):
+        return None  # (a provider that states its own headway, i.e. the simulator, has no real timetable)
+    s = (aware(leg.departure) - board_at).total_seconds() / 60
+    if not -headway <= s <= (headway + 2 if headway_known else 60):
+        return None  # the planner's train isn't the next one you'd catch (e.g. it kept a later, faster train)
+    p_miss = 0.5 * (1 + math.erf(-s / (TIMETABLE_SIGMA_MIN * math.sqrt(2))))
+    wait = s + headway * p_miss
+    sd = math.sqrt(TIMETABLE_SIGMA_MIN ** 2 + p_miss * (1 - p_miss) * headway ** 2)
+    return max(0.0, wait), sd
+
+
+def transfer_min(prev: Leg | None, leg: Leg, headway: float) -> float:
+    """Walking time to change trains when the planner lists one train straight after another (it only adds a
+    walking leg when you leave the station). Its scheduled connection (arrive on one, depart on the next) is the walk
+    plus a wait that averages half a headway, so the walk is about the connection minus half a headway."""
+    if not prev or not prev.is_transit or not prev.arrival or not leg.departure:
+        return 0.0
+    gap = (aware(leg.departure) - aware(prev.arrival)).total_seconds() / 60
+    if gap <= 0:
+        return 0.0
+    return round(min(gap, MAX_TRANSFER_MIN, max(1.0, gap - headway / 2)), 1)
+
+
 def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> JourneyForecast:
     t = 0.0  # minutes after depart_at
     var = 0.0
@@ -165,7 +219,8 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     disruptions: dict[str, dict] = {}
     live_any, support, partial = False, 0, False
     band = hour_band(depart_at)
-    for leg in j.legs:
+    for i, leg in enumerate(j.legs):
+        before = j.legs[i - 1] if i else None
         if not leg.is_transit:
             t += leg.duration_min
             var += (0.08 * leg.duration_min) ** 2
@@ -180,9 +235,16 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
         if cat == SUSPENDED:
             feasible = False
         partial |= cat == PART_SUSPENDED
-        headway = (leg.headway_min or DEFAULT_HEADWAY_MIN.get(leg.mode, 8.0)) * HEADWAY_MULT.get(cat, 1.0)
+        base_headway, basis = scheduled_headway(leg, depart_at + timedelta(minutes=t))
+        change = 0.0 if leg.headway_min else transfer_min(before, leg, base_headway)
+        t += change
+        var += (0.15 * change) ** 2
         board_at = depart_at + timedelta(minutes=t)
+        headway = base_headway * HEADWAY_MULT.get(cat, 1.0)
         wait, wait_sd, live, upcoming = headway / 2, headway / math.sqrt(12), False, []
+        timed = timetable_wait(leg, board_at, base_headway, cat, headway_known=basis != "typical")
+        if timed:
+            (wait, wait_sd), basis = timed, "timetable"
         if (board_at - ctx.now) <= timedelta(minutes=LIVE_HORIZON_MIN) and cat != SUSPENDED:
             arr = ctx.arrivals(leg.from_stop_id)
             if arr:
@@ -201,7 +263,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                     line_cat = ctx.category(a.line_id)
                     p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, line_cat != GOOD,
                                           category=line_cat, queue_rank=rank, gap_s=gap, feed_age_s=age,
-                                          weekend=weekend)
+                                          weekend=weekend, bound=bound_of(a.platform), polled_at=ctx.now)
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
                     if a.terminates_here:
                         when += timedelta(seconds=TERMINUS_TURNAROUND_S)
@@ -213,7 +275,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                     if when >= board_at + timedelta(seconds=20):
                         wait = (when - board_at).total_seconds() / 60
                         wait_sd = max(0.3, (p["q90_s"] - p["q10_s"]) / 2.56 / 60)
-                        live, support = True, max(support, p["support"])
+                        live, support, basis = True, max(support, p["support"]), "live"
                         break
         live_any |= live
         ride = leg.duration_min * RIDE_MULT.get(cat, 1.0)
@@ -225,7 +287,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
         var += wait_sd ** 2 + ride_sd ** 2
         legs.append(LegForecast(leg.mode, leg.line_id, leg.line_name, leg.from_name, leg.to_name, leg.direction,
                                 round(wait, 1), round(ride, 1), round(math.sqrt(wait_sd ** 2 + ride_sd ** 2), 2),
-                                live, cat, upcoming))
+                                live, cat, upcoming, basis, change))
     sd = math.sqrt(var)
     p50 = t
     p10, p90 = max(p50 - 1.28 * sd, p50 * 0.85), p50 + 1.28 * sd
@@ -488,11 +550,11 @@ def apply_chosen_stops(provider: Provider, commute: Commute, depart_at: datetime
     if not chosen:
         return journeys, False  # nothing runs via the chosen stations right now: show everything, say so
     seen, out = set(), []
-    for j in sorted(chosen, key=lambda j: j.duration_min):
+    for j in sorted(chosen, key=lambda j: (aware(j.arrival or datetime.max), j.duration_min)):  # first arrival per route
         if j.signature not in seen:
             seen.add(j.signature)
             out.append(j)
-    return out, True
+    return sorted(out, key=lambda j: j.duration_min), True
 
 
 def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: datetime,

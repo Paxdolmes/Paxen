@@ -97,3 +97,39 @@ Regression*, NeurIPS 2019), per lead bucket ("Mondrian" conformal):
 quality 1.0); upstream-delay and time-since-status-change features (they need a new recorder signal and
 validation; listed for later); extending measured truth to the Overground and Elizabeth line (there's no
 Trackernet equivalent; National Rail's Darwin feed carries actual times for both and is the planned route).
+
+---
+
+## Amendment 2 (5 November 2026, before any multi-day results; nothing below has been run on recorded data)
+
+Written before the first verdict (about 14 November, once 10 days of measured arrivals exist). Nobody involved has
+seen a protocol result on recorded data. Rules 1-4, the ground truth and Amendment 1 are unchanged.
+
+**A2.1 One new candidate, `gbm_numbat`.** It's the `gbm` candidate (same model, hyperparameters and conformal
+intervals per A1.3), with four extra features from TfL's **NUMBAT 2025** (`paxen/numbat.py`: a *typical* autumn
+2025 day for each of Mon / Tue-Thu / Fri / Sat / Sun, published July 2026, before any recording; it's a fixed table, so
+nothing in it comes from the test days). Each feature is looked up for the prediction's station and line, in the
+platform's direction when its name gives one ("Westbound - Platform 1"; otherwise averaged over directions), over the
+hour around the train's expected arrival (prediction time + lead), all known when the prediction is made:
+
+| Feature | Definition | Why it could matter |
+|---|---|---|
+| `sched_headway_s` | scheduled seconds between trains (3600 / timetabled trains per hour) | sets how much a late train matters, and how full the platform gets |
+| `gap_ratio` | `gap_s` / `sched_headway_s` (the gap behind the train ahead vs the timetabled one) | above 1, more passengers are waiting for this train than usual, so it dwells longer and runs later: the start of bunching |
+| `activity_per_train` | typical boarders plus alighters per train at that platform | the main driver of dwell time |
+| `load_per_train` | typical passengers on board arriving trains | crowded trains board more slowly |
+
+TfL's countdown doesn't use demand. `hier` and `gbm` only see a stop's average error by five time bands. These
+features add 15-minute demand that carries across stations, and a scale for the existing gap feature.
+
+**A2.2 Order of simplicity:** `provider` < `hier` < `hier_ctx` < `gbm` < `gbm_numbat` (it depends on an extra data
+source). A tie within 1% still goes to the simpler model, so NUMBAT must earn its place on unseen days.
+
+**A2.3 Honest cost.** A fifth candidate slightly raises the chance that one passes by luck. The thresholds aren't
+loosened to compensate: they're the same 3% / two-thirds / 70-90% / decision-horizon rules. If NUMBAT data is missing
+at run time, the four columns are empty and dropped (as for any never-observed signal), so the candidate falls back
+to being `gbm`.
+
+**Separate from this protocol:** the journey forecast now also uses NUMBAT frequencies and TfL's timetable for waits
+when there is no live countdown (docs/historical-data.md). That doesn't correct TfL's countdown, so it isn't a
+candidate here. It was checked directly against live arrivals instead.

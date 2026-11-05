@@ -260,11 +260,17 @@ def _line_string(raw: str | None) -> list[tuple[float, float]]:
         return []
 
 
+def _arrival_key(j: Journey) -> tuple:
+    return (j.arrival or datetime.max.replace(tzinfo=timezone.utc), j.duration_min)
+
+
 def dedupe_journeys(journeys: list[Journey]) -> list[Journey]:
-    """One journey per route signature (the quickest), ordered by duration."""
+    """One journey per route signature, ordered by duration. Of several departures on the same route, keep the one
+    that arrives first (the planner's next catchable train): a later, faster train isn't the one you'd be on, and its
+    scheduled departure is what times the wait on infrequent services (engine.timetable_wait)."""
     best: dict[str, Journey] = {}
     for j in journeys:
-        if j.signature not in best or j.duration_min < best[j.signature].duration_min:
+        if j.signature not in best or _arrival_key(j) < _arrival_key(best[j.signature]):
             best[j.signature] = j
     return sorted(best.values(), key=lambda j: j.duration_min)
 

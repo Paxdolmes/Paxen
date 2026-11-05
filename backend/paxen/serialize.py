@@ -64,6 +64,7 @@ def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) 
             else l.to_name,
             "from_stop_id": j.legs[i].from_stop_id, "stop_ids": j.legs[i].stop_ids or None,
             "direction": l.direction, "wait_min": l.wait_min, "ride_min": l.ride_min, "live": l.live,
+            "wait_basis": l.wait_basis if l.mode != "walking" else None, "transfer_min": l.transfer_min,
             "status": l.category, "next_departures_min": l.next_departures_min,
             "path": [list(pt) for pt in leg_paths[i]] if with_paths else None,
         } for i, l in enumerate(f.legs)],
