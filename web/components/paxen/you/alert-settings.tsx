@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { mutate } from 'swr'
 import { api } from '@/lib/api'
+import { disablePush, enablePush, pushSupport, type PushSupport } from '@/lib/push'
 import type { Dashboard, User } from '@/lib/types'
+import { Button } from '../primitives/button'
 import { Card, Divider, Section } from '../primitives/card'
 import { SettingRow, Stepper, Switch, TimeField } from '../primitives/controls'
 import { Text } from '../primitives/text'
@@ -46,6 +48,8 @@ export function AlertSettings({ user }: { user: User }) {
   return (
     <Section title="Alerts">
       <Card>
+        <PushRow enabled={local.push_enabled} onChange={(push_enabled) => setLocal((u) => ({ ...u, push_enabled }))} />
+        <Divider />
         <SettingRow
           title="Pause monitoring"
           description="Stop checking your commutes and sending alerts."
@@ -101,5 +105,91 @@ export function AlertSettings({ user }: { user: User }) {
         </Text>
       )}
     </Section>
+  )
+}
+
+const PUSH_HELP: Record<Exclude<PushSupport, 'supported'>, string> = {
+  'needs-home-screen': 'On iPhone, add Paxen to your Home Screen first (Share, then Add to Home Screen), then open it from there.',
+  unsupported: "This browser can't show notifications. Alerts still appear in the Alerts tab.",
+  blocked: 'Notifications are blocked for Paxen. Allow them in your browser or phone settings, then try again.',
+}
+
+function PushRow({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+  const [support, setSupport] = useState<PushSupport>('supported')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  useEffect(() => setSupport(pushSupport()), [])
+
+  const toggle = async (on: boolean) => {
+    setBusy(true)
+    setNote(null)
+    try {
+      if (on) {
+        const ok = await enablePush()
+        if (!ok) {
+          setSupport(pushSupport())
+          setNote('Notifications weren\u2019t allowed, so alerts will only appear in the Alerts tab.')
+          return
+        }
+      } else {
+        await disablePush()
+      }
+      onChange(on)
+      await mutate(['dashboard'])
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Could not change notifications.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const test = async () => {
+    setBusy(true)
+    try {
+      const { result } = await api.testPush()
+      setNote(result === 'sent' ? 'Test sent. It should arrive in a few seconds.' : 'That didn\u2019t reach this device. Turn notifications off and on again.')
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Could not send a test.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const help = support === 'supported' ? null : PUSH_HELP[support]
+  return (
+    <div className="flex flex-col gap-2">
+      <SettingRow
+        title="Push notifications"
+        description="Get alerts on this device, even when Paxen is closed."
+        control={
+          <Switch
+            checked={enabled}
+            onChange={toggle}
+            label="Push notifications"
+            disabled={busy || (support !== 'supported' && !enabled)}
+          />
+        }
+      />
+      {(help || note || enabled) && (
+        <div className="flex flex-col items-start gap-2 px-5 pb-4">
+          {help && (
+            <Text variant="footnote" tone="secondary">
+              {help}
+            </Text>
+          )}
+          {note && (
+            <Text variant="footnote" tone="secondary" role="status">
+              {note}
+            </Text>
+          )}
+          {enabled && (
+            <Button variant="ghost" size="sm" onClick={test} loading={busy}>
+              Send a test notification
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

@@ -9,6 +9,10 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: '/sw.js', // the notification worker must update promptly, never from a stale cache
+        headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }],
+      },
+      {
         source: '/:path*',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },

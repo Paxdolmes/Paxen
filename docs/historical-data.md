@@ -155,7 +155,12 @@ it's line-wide (not your section), and the history counts a disruption that brie
 
 **Weather (tested with Daniel's Open-Meteo file, Apr 2022 - Oct 2026):** after allowing for hour and weekday, new
 disruptions start 1.7x as often at 30C+, 1.2x at 25-30C, 1.4x below freezing, 1.3x in snow (63 hours only) and
-1.2x in 60-80 km/h gusts; rain makes no difference. Paxen now **records** hourly weather live, and the model is
+1.2x in 60-80 km/h gusts; rain looked like it made no difference.
+A closer look (allowing for month as well, rain summed over earlier hours, by line type and cause) shows rain
+*does* matter, modestly and with a delay. New disruptions run about 1.10x after 3mm+ in the previous 3 hours (deep
+lines 1.13x). Track and power faults run 1.18x after a wet day (5-15mm in 24 hours, about 3 standard errors).
+Disruptions that start in the wet last longer: median 111 minutes vs 96 when dry. The heaviest-rain hours are too
+few to judge. The same-hour, all-causes test had hidden all of this. Paxen now **records** hourly weather live, and the model is
 unchanged. Once months of Paxen's own recordings exist, a weather candidate can be pre-registered and tested like
 any other.
 

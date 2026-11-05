@@ -31,7 +31,8 @@ class User(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     name: Mapped[str | None] = mapped_column(String(80))
-    push_token: Mapped[str | None] = mapped_column(String(255))
+    push_token: Mapped[str | None] = mapped_column(String(255))  # Expo (a future native app)
+    web_push: Mapped[dict | None] = mapped_column(JSON)  # the browser's push subscription (paxen/webpush.py)
     quiet_start: Mapped[str] = mapped_column(String(5), default="22:00")
     quiet_end: Mapped[str] = mapped_column(String(5), default="06:30")
     monitoring_paused: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -203,6 +204,13 @@ class WatchedStop(Base):
     last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class AppSecret(Base):
+    """Server-generated secrets that must survive restarts and be shared by the API and worker (VAPID keys)."""
+    __tablename__ = "app_secrets"
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
 class ContextEvent(Base):
     """A run of something seen in the live context: a line status, station disruption, lift outage or planned
     works. One row per run (first seen to last seen), so it can be kept permanently. See paxen/context.py."""
@@ -282,7 +290,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("trips", "status", "VARCHAR(20)"),
                   ("predictions", "platform", "VARCHAR(60)"),
                   ("predictions", "queue_rank", "INTEGER"),
-                  ("predictions", "gap_s", "INTEGER")]
+                  ("predictions", "gap_s", "INTEGER"),
+                  ("users", "web_push", "JSON")]
 
 
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).
