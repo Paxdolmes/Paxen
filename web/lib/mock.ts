@@ -114,6 +114,14 @@ export async function mockRequest(method: string, fullPath: string, body: unknow
     case 'PATCH /v1/me':
       d.user = { ...d.user, ...(body as Partial<User>) }
       return d.user
+    case 'POST /v1/push/subscribe':
+      d.user = { ...d.user, push_enabled: true }
+      return d.user
+    case 'DELETE /v1/push/subscribe':
+      d.user = { ...d.user, push_enabled: false }
+      return d.user
+    case 'POST /v1/push/test':
+      return { result: 'sent' }
     case 'DELETE /v1/me':
       state = createState()
       return { ok: true }

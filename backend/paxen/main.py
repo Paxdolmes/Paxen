@@ -250,6 +250,52 @@ def me(u: User = Depends(current_user)):
     return ser.user(u)
 
 
+# ---- web push (paxen/webpush.py) ----
+class PushSubscriptionIn(BaseModel):
+    subscription: dict
+
+
+@app.get("/v1/push/key")
+def push_key(s: Session = Depends(db)):
+    """The server's public VAPID key, for the browser's pushManager.subscribe()."""
+    from .webpush import public_key
+
+    return {"public_key": public_key(s)}
+
+
+@app.post("/v1/push/subscribe")
+def push_subscribe(body: PushSubscriptionIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    from .webpush import valid_subscription
+
+    if not valid_subscription(body.subscription):
+        raise HTTPException(422, "That isn't a valid push subscription.")
+    sub = body.subscription
+    u.web_push = {"endpoint": sub["endpoint"], "keys": {k: sub["keys"][k] for k in ("p256dh", "auth")}}
+    s.commit()
+    return ser.user(u)
+
+
+@app.delete("/v1/push/subscribe")
+def push_unsubscribe(u: User = Depends(current_user), s: Session = Depends(db)):
+    u.web_push = None
+    s.commit()
+    return ser.user(u)
+
+
+@app.post("/v1/push/test")
+def push_test(u: User = Depends(current_user), s: Session = Depends(db)):
+    from .webpush import send
+
+    if not u.web_push:
+        raise HTTPException(409, "Push notifications aren't turned on for this device.")
+    res = send(s, u.web_push, "Paxen", "Notifications are working. We'll tell you when your commute isn't normal.",
+               {"url": "/?tab=alerts"})
+    if res == "gone":
+        u.web_push = None
+        s.commit()
+    return {"result": res}
+
+
 @app.patch("/v1/me")
 def patch_me(body: MePatch, u: User = Depends(current_user), s: Session = Depends(db)):
     for k, v in body.model_dump(exclude_unset=True).items():

@@ -313,6 +313,8 @@ export interface Insights {
 POST   /v1/users                         -> { user_id, token }        anonymous device account
 GET    /v1/health                        -> { ok, provider, simulated, scenario, feed }
 GET    /v1/me | PATCH /v1/me (Partial<User> + push_token) | DELETE /v1/me
+GET    /v1/push/key -> {public_key}   POST /v1/push/subscribe {subscription} -> User   DELETE /v1/push/subscribe -> User
+POST   /v1/push/test -> {result: "sent" | "gone" | "failed"}   (web push; see backend/paxen/webpush.py)
 DELETE /v1/me/history                    -> { trips_deleted, alerts_deleted }
 POST   /v1/onboarding  { name?, home: PlaceIn, work: PlaceIn, days, morning: {start,end}, evening: {start,end}, preference }
                                          PlaceIn = { label, name, lat, lon, source }
