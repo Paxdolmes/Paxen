@@ -85,3 +85,25 @@ def test_disruption_start_comes_from_status_snapshots(session):
     session.commit()
     st = {"central": LineStatus("central", "Central", "tube", "severe", "Severe Delays")}
     assert disruption_starts(session, "tfl", st, NOW)["central"] == NOW - timedelta(minutes=30)
+
+
+@needs_data
+def test_new_disruption_risk_differs_by_line_and_hour():
+    from datetime import timezone as tz
+
+    peak = (datetime(2026, 11, 6, 8, 0, tzinfo=tz.utc), datetime(2026, 11, 6, 8, 40, tzinfo=tz.utc))
+    late = (datetime(2026, 11, 5, 22, 0, tzinfo=tz.utc), datetime(2026, 11, 5, 22, 40, tzinfo=tz.utc))
+    assert disruptions.onset_risk("victoria", *peak) < disruptions.onset_risk("district", *peak)
+    assert disruptions.onset_risk("district", *late) < disruptions.onset_risk("district", *peak)
+    assert disruptions.onset_risk("elizabeth", *peak) is None  # not in the Underground history
+
+
+@needs_data
+def test_reliable_preference_counts_disruption_risk():
+    from paxen.engine import rank
+
+    ctx = NetworkContext(Tfl(), NOW, {}, CorrectionModel())
+    a, b = forecast_journey(journey(NOW), ctx, NOW), forecast_journey(journey(NOW), ctx, NOW)
+    a.disruption_risk, b.disruption_risk = 0.15, 0.03
+    assert rank([a, b], "reliable")[0] is b
+    assert forecast_journey(journey(NOW), ctx, NOW).disruption_risk > 0  # central line, afternoon

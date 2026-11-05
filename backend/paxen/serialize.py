@@ -56,6 +56,7 @@ def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) 
         "crowding": f.crowding,
         "disruptions": f.disruptions,
         "live_data": f.live_data,
+        "disruption_risk": f.disruption_risk,
         "legs": [{
             "mode": l.mode, "line_id": l.line_id, "line_name": l.line_name,
             # The planner names the ends after reverse-geocoded addresses ("472 FULHAM ROAD"); use the user's names.

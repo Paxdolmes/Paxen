@@ -136,6 +136,32 @@ Overground and Elizabeth line use the Tube curves for the same status.
 Rebuild or re-check: `python -m paxen.disruptions build|check <status-messages.csv>`. The 25 MB source file isn't
 in the repo; only the derived curves are (28 KB). Confirm the file's licence for commercial use, as with other TfL data.
 
+## What else predicts disruption? (status history, 5 Nov)
+Daniel asked what non-obvious signals matter. Weather couldn't be tested here: every weather archive is blocked by
+this environment's network settings. The status history shows (2022-2026, 21,380 disruptions, ~13 a day):
+
+| Signal | Pattern | Held-out test (fit to Oct 2025, score the next year) |
+|---|---|---|
+| **Line** | District, Central, Metropolitan and Piccadilly get ~3x as many new disruptions per hour as the Victoria | ✅ predicts; levels drift (Central's rate doubled 2023-2026), so the level comes from the latest year |
+| **Hour of day** | 1.7x average at 05:00 (start of service), 1.2-1.3x in the peaks, 0.6x late evening | ✅ predicts |
+| **Day type** | Saturdays have ~30% more disruptions than weekdays | ✅ small gain |
+| **Season** | train faults peak in Jan; track/power Nov-Jan; staff shortages/cancellations double in Feb-Mar and Jul-Sep; police/security peaks in August | ❌ didn't carry over to the next year (made predictions worse), so not used |
+| **Late weekend nights** | customer incidents 2.2x as often 21:00-02:00 on Fri/Sat as on other nights | descriptive |
+
+**Now used:** each route gets `disruption_risk`, the chance a new disruption starts on one of its (currently
+good) Tube lines while you're on it. Example: 40 minutes in the morning peak is ~11% on the District and ~4% on the
+Victoria. The **reliable** preference charges 15 minutes per unit of that chance (a judgment, not fitted). Limits:
+it's line-wide (not your section), and the history counts a disruption that briefly lifts and returns as two.
+
+**Worth testing next (needs another session):**
+- **Weather:** add `archive-api.open-meteo.com` to this environment's allowed domains, or download the hourly
+  London file (Open-Meteo archive, CSV) and upload it. Then the history can be checked against heat, rain, wind and frost.
+- **Station disruptions** (`/StopPoint/Mode/.../Disruption`): closures and skipped stations (e.g. westbound trains not
+  calling at Barons Court until November). Paxen doesn't check these yet.
+- **Lift outages** (`/Disruptions/Lifts/v2`) for step-free journeys, **road disruptions** for buses, and **cycle
+  hire** availability as a fallback when a line is suspended.
+- Paxen's own status snapshots will keep these rates current once the history file ages.
+
 ## Licensing
 NUMBAT is TfL open data (Open Government Licence based terms). Attribution: *Powered by TfL Open Data*. As with the
 rest of TfL's data, confirm commercial-use terms before launch (see [data-sources.md](data-sources.md)).

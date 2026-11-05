@@ -106,6 +106,7 @@ export interface RouteOption {
   crowding: { level: 'quiet' | 'typical' | 'busy' | 'busier' | 'very_busy' | 'n/a'; label: string; basis: string | null }
   disruptions: Disruption[]
   live_data: boolean
+  disruption_risk?: number | null // chance a new disruption starts on one of its (good) Tube lines during the trip, from TfL status history
   legs: Leg[]
 }
 
