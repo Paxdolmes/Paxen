@@ -138,7 +138,13 @@ def train_isolated() -> dict:
     import subprocess
     import sys
 
-    proc = subprocess.run([sys.executable, "-m", "paxen.worker", "--train-once"])
+    import os
+
+    # One thread for the model libraries (OpenMP). By default they start one thread per CPU the host has, which
+    # in a container is far more than it may use; with the recorder also running, the threads spin waiting for
+    # each other and a 3-second model fit took over 10 minutes in testing.
+    env = {**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+    proc = subprocess.run([sys.executable, "-m", "paxen.worker", "--train-once"], env=env)
     if proc.returncode == 0:
         return {"exit": 0}
     if proc.returncode in (-9, 137):
