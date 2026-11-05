@@ -39,6 +39,8 @@ class Settings:
     poll_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_POLL_INTERVAL", "30")))
     monitor_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_MONITOR_INTERVAL", "60")))
     train_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_TRAIN_INTERVAL", "21600")))
+    # Live context (weather, station disruptions, lifts, planned works, crowding): see paxen/context.py. 0 = off.
+    context_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_CONTEXT_INTERVAL", "300")))
     sim_scenario: str = field(default_factory=lambda: os.getenv("PAXEN_SIM_SCENARIO", "auto"))
     # Whole-network recording: modes polled with one request each (TfL /Mode/{mode}/Arrivals).
     # Defaults to London rail when using TfL; set to "" to record only the stops users' commutes use.

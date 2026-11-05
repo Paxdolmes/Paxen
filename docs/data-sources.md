@@ -11,7 +11,8 @@
 | TfL NUMBAT 2025 (crowding.data.tfl.gov.uk) | scheduled trains per hour for waits without a countdown; typical demand features for the `gbm_numbat` candidate | implemented (`numbat.py`, data file committed) | rebuild yearly when TfL publishes a new edition; see [historical-data.md](historical-data.md) |
 | TfL Journey Planner timetabled departures | waits on services 8+ min apart; walk time when changing trains | implemented (`engine.timetable_wait`, `transfer_min`) | change walks are a heuristic from the planner's connection time |
 | TfL trains service status messages (Apr 2022 - Oct 2026) | how likely a current disruption is to still be on when you travel | implemented (`disruptions.py`, derived curves committed) | confirm licence; rebuild when a newer export is available |
-| TfL station crowding (`/crowding`) | station busyness | implemented | only ever shown as an estimate |
+| TfL station crowding (`/crowding`) | station busyness | implemented; **live busyness of every Tube station recorded every 15 min** (`station_crowding`) | only ever shown as an estimate |
+| Live context recorded for future models (`context.py`) | permanent line-status history (one row per change, all modes); hourly London weather (Open-Meteo); station disruptions; lift outages; planned works for the week ahead (daily); road disruptions (raw, archive only) | recording only: no model uses these yet | only build in signals that are also available live (they all are) |
 
 **Ground truth.** Today it is inferred from countdowns: a vehicle that was ≤2 min away and then disappeared
 from the board. That is bounded and quality-scored, but it is not measurement. Darwin actual times and bus

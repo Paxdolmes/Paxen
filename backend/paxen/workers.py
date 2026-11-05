@@ -61,6 +61,13 @@ def archive_tick() -> list[dict]:
         return [archive_network(s, provider, m, utcnow()) for m in settings.archive_only_modes]
 
 
+def context_tick() -> dict:
+    from .context import record_context
+
+    with SessionLocal() as s:
+        return record_context(s, get_provider(), utcnow(), settings.context_interval_s)
+
+
 _aq_day: str | None = None
 
 
@@ -169,6 +176,9 @@ async def _loop(fn, interval: int, name: str, first_delay: int = 0):
 def start(loop_tasks: list) -> None:
     loop_tasks.append(asyncio.create_task(_loop(recorder_tick, settings.poll_interval_s, "recorder")))
     loop_tasks.append(asyncio.create_task(_loop(monitor_tick, settings.monitor_interval_s, "monitor")))
+    if settings.provider == "tfl" and settings.context_interval_s > 0:
+        loop_tasks.append(asyncio.create_task(_loop(context_tick, settings.context_interval_s, "context",
+                                                    first_delay=60)))
     delay = 0 if settings.provider == "sim" else TRAIN_FIRST_DELAY_S
     loop_tasks.append(asyncio.create_task(_loop(train_isolated, settings.train_interval_s, "train", first_delay=delay)))
     from .archive import get_archive

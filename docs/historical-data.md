@@ -153,6 +153,17 @@ good) Tube lines while you're on it. Example: 40 minutes in the morning peak is 
 Victoria. The **reliable** preference charges 15 minutes per unit of that chance (a judgment, not fitted). Limits:
 it's line-wide (not your section), and the history counts a disruption that briefly lifts and returns as two.
 
+**Weather (tested with Daniel's Open-Meteo file, Apr 2022 - Oct 2026):** after allowing for hour and weekday, new
+disruptions start 1.7x as often at 30C+, 1.2x at 25-30C, 1.4x below freezing, 1.3x in snow (63 hours only) and
+1.2x in 60-80 km/h gusts; rain makes no difference. Paxen now **records** hourly weather live, and the model is
+unchanged. Once months of Paxen's own recordings exist, a weather candidate can be pre-registered and tested like
+any other.
+
+**Now recorded live (for future models, no model change):** see `paxen/context.py` and data-sources.md. That covers
+line status as a permanent per-change history (the 30-second snapshots are deleted after 60 days, and this history
+covers the Overground and Elizabeth line too), weather, station disruptions, lift outages, planned works and Tube
+station crowding.
+
 **Worth testing next (needs another session):**
 - **Weather:** add `archive-api.open-meteo.com` to this environment's allowed domains, or download the hourly
   London file (Open-Meteo archive, CSV) and upload it. Then the history can be checked against heat, rain, wind and frost.
