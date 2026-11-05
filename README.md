@@ -73,7 +73,9 @@ See [docs/product.md](docs/product.md) for how the brief maps to the code, and w
 
 ## Historical data
 TfL's NUMBAT 2025 (typical-day train frequencies and demand) is bundled in `backend/paxen/data/`. It times the waits in
-journey forecasts when there's no live countdown, and feeds the `gbm_numbat` model candidate. Which historical
+journey forecasts when there's no live countdown, and feeds the `gbm_numbat` model candidate. TfL's
+line-status history (2022-2026) teaches Paxen how long disruptions last, so a delay now only counts against a later
+trip as much as it's likely to still be on. Which historical
 datasets were assessed, and the live check behind it: [docs/historical-data.md](docs/historical-data.md).
 
 ```bash

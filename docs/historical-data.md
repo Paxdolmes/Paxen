@@ -100,6 +100,42 @@ assume a 2-minute wait on any Tube line and said 08:58.
 - The Elizabeth line is still too optimistic by about 3 minutes (irregular gaps on the outer branches).
 - The change-walk allowance is a heuristic from TfL's planner. It's not yet checked against measured journeys.
 
+## Update (5 Nov, later): line-status history and the other files Daniel sent
+
+| File | Verdict | Why |
+|---|---|---|
+| **Trains service status messages** (every Tube line status, Apr 2022 - Oct 2026, ~120k messages) | ✅ **Used** | It's the "historical line status" FOI request, already answered. Paxen learns how long disruptions last. |
+| Service operated (% of timetable) / km operated | ℹ️ Evidence, not used directly | Weekdays typically run 85-93% of timetabled trains, which helps explain why frequency-based waits are about 1 min optimistic. The fix is to measure real gaps from Paxen's own Trackernet data (next task), not to bolt on monthly percentages that include strike days. |
+| Lost customer hours | ❌ | Stops in 2020; line totals per 4 weeks. |
+| Daily journeys, station footfall, journeys by mode | ❌ | Totals published after the fact; nothing about the moment of a prediction. NUMBAT already covers typical demand. |
+
+### How long disruptions last (`backend/paxen/disruptions.py`, `data/disruption_clearance.json`)
+Consecutive status messages make one disruption (94,690 observations). For a line disrupted now, Paxen estimates
+the chance it's **still disrupted when you reach that line**, from the status (minor, severe, part-suspended or
+suspended), the cause in the message text (signal failure, faulty train, customer incident, staff shortage, strike,
+"earlier ...", and so on) and how long it has lasted so far. Paxen's recorder already logs status every 30 s, so it
+knows that last one. Planned closures and the nightly closure stay certain, as before.
+
+**Held-out check:** fit on Apr 2022 - Oct 2025, scored on Nov 2025 - Oct 2026 (26,901 observations). The table gives
+Brier scores for P(still disrupted later); lower is better.
+
+| Ahead | Before (assumed still on) | Status only | + time so far | **+ cause (used)** |
+|---|---|---|---|---|
+| 15 min | 0.054 | 0.051 | 0.049 | **0.049** |
+| 1 hour | 0.216 | 0.165 | 0.155 | **0.149** |
+| 2 hours | 0.378 | 0.227 | 0.212 | **0.200** |
+
+**In the forecast:** a disruption's extra wait and ride time is weighted by that chance, and so is the extra
+uncertainty. A suspension only makes a route impossible if it's more likely than not to still be on. Each disruption
+in the API now carries `chance_still_on`. Example: severe delays from a signal failure 5 minutes ago are 76% likely to
+still be on in an hour, and 6% by tomorrow morning. Before, they were applied in full to tomorrow's commute.
+Limits: "still disrupted" includes being downgraded (say from severe to minor), but the current status's impact is
+what gets weighted, so it errs a little on the cautious side. Only Underground lines are in the history; the
+Overground and Elizabeth line use the Tube curves for the same status.
+
+Rebuild or re-check: `python -m paxen.disruptions build|check <status-messages.csv>`. The 25 MB source file isn't
+in the repo; only the derived curves are (28 KB). Confirm the file's licence for commercial use, as with other TfL data.
+
 ## Licensing
 NUMBAT is TfL open data (Open Government Licence based terms). Attribution: *Powered by TfL Open Data*. As with the
 rest of TfL's data, confirm commercial-use terms before launch (see [data-sources.md](data-sources.md)).
@@ -109,4 +145,4 @@ rest of TfL's data, confirm commercial-use terms before launch (see [data-source
    explicit permission for model training. It adds departure and dwell times, which Trackernet doesn't give directly.
 2. **Gate-to-gate journey times:** anonymised station-pair distributions by 15-minute entry time (counts, percentiles,
    small cells suppressed). These would let Paxen check whole-journey forecasts, including walks and changes.
-3. **Historical line status:** to model how long disruptions typically last.
+3. ~~Historical line status~~: no longer needed (Daniel found TfL's status-message history; see above).

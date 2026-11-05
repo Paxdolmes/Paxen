@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .db import Trip
 from .domain import Journey, Leg
-from .engine import NetworkContext, current_statuses, forecast_journey
+from .engine import NetworkContext, current_statuses, disruption_starts, forecast_journey
 from .forecast import active_model
 from .providers.base import Provider
 from .timeutil import aware, naive_utc
@@ -120,7 +120,9 @@ def live_status(s: Session, provider: Provider, trip: Trip, now: datetime,
                         now, now, line_id=leg.get("line_id") if transit else None, line_name=leg.get("line_name"),
                         from_stop_id=leg.get("from_stop_id"), direction=leg.get("direction"),
                         stop_ids=leg.get("stop_ids") or []))
-    ctx = NetworkContext(provider, now, current_statuses(provider, now), active_model(s, provider.name))
+    statuses = current_statuses(provider, now)
+    ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name),
+                         disrupted_since=disruption_starts(s, provider.name, statuses, now))
     fc = forecast_journey(Journey(rest, sum(l.duration_min for l in rest), now, now, provider.name), ctx, now)
     nxt = next(((rest_i, lf) for rest_i, lf in enumerate(fc.legs) if lf.line_id), None)
     next_dep = None
