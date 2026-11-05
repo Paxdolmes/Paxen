@@ -174,7 +174,8 @@ def record_crowding(s: Session, provider, now: datetime) -> int:
             return stop, None
 
     n = 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    # two at a time: ~250 requests spread over ~30 s, leaving TfL's 500/min allowance for the recorder
+    with ThreadPoolExecutor(max_workers=2) as pool:
         for stop, d in pool.map(one, stops):
             if d and d.get("dataAvailable"):
                 s.add(StationCrowding(polled_at=naive_utc(now), stop_id=stop,

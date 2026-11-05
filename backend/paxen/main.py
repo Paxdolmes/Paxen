@@ -8,7 +8,7 @@ import os
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -22,7 +22,7 @@ from .config import settings
 from .db import Alert, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
 from .engine import (
-    PREFERENCES, clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
+    clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
     set_usual,
 )
 from .insights import insights as build_insights
@@ -70,7 +70,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Paxen API", version="0.1.0", lifespan=lifespan,
               description="Commute intelligence: know when your normal commute is not normal.")
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
+# The iPhone app (web/ios, Capacitor) serves its screens from capacitor://localhost: always allow it.
+_origins = settings.cors_origins if "*" in settings.cors_origins else [*settings.cors_origins, "capacitor://localhost"]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
 
 
 # ------------------------------------------------------------------------ plumbing
@@ -284,15 +286,23 @@ def push_unsubscribe(u: User = Depends(current_user), s: Session = Depends(db)):
 
 @app.post("/v1/push/test")
 def push_test(u: User = Depends(current_user), s: Session = Depends(db)):
-    from .webpush import send
+    """A test notification to this user's device: the iPhone app (APNs) or the web app (web push)."""
+    title, body = "Paxen", "Notifications are working. We'll tell you when your commute isn't normal."
+    if (u.push_token or "").startswith("apns:"):
+        from .apns import send as apns_send
 
-    if not u.web_push:
+        res = apns_send(u.push_token, title, body, {"url": "/?tab=alerts"})
+        if res == "gone":
+            u.push_token = None
+    elif u.web_push:
+        from .webpush import send
+
+        res = send(s, u.web_push, title, body, {"url": "/?tab=alerts"})
+        if res == "gone":
+            u.web_push = None
+    else:
         raise HTTPException(409, "Push notifications aren't turned on for this device.")
-    res = send(s, u.web_push, "Paxen", "Notifications are working. We'll tell you when your commute isn't normal.",
-               {"url": "/?tab=alerts"})
-    if res == "gone":
-        u.web_push = None
-        s.commit()
+    s.commit()
     return {"result": res}
 
 

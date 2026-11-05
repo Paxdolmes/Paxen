@@ -69,7 +69,8 @@ cd backend && pytest -q
 | `PAXEN_VAPID_SUBJECT` | `mailto:alerts@paxen.app` | contact address push services see with each notification; set it to `mailto:<your email>` (push keys themselves are created automatically) |
 | `PAXEN_CONTEXT_INTERVAL` | `300` | seconds between live-context recordings (weather, station disruptions, lifts, planned works, crowding); `0` = off |
 
-Deploying (Railway + Vercel, step by step): [docs/deploy.md](docs/deploy.md).
+Deploying (Railway + Vercel, step by step): [docs/deploy.md](docs/deploy.md). The iPhone app and TestFlight:
+[docs/iphone-app.md](docs/iphone-app.md).
 
 See [docs/product.md](docs/product.md) for how the brief maps to the code, and what was added or cut.
 

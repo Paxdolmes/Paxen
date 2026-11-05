@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
+// MOBILE_BUILD=1 builds static files for the iPhone app (Capacitor bundles web/out). Headers don't apply there.
+const mobile = process.env.MOBILE_BUILD === '1'
+
 const nextConfig = {
+  ...(mobile ? { output: 'export' } : {}),
   typescript: {
     ignoreBuildErrors: false,
   },

@@ -1,0 +1,75 @@
+# Builds the Paxen iPhone app (web/ios, Capacitor) on a cloud Mac and uploads it to TestFlight.
+# Run it from GitHub: Actions > "iPhone app to TestFlight" > Run workflow. Setup: docs/iphone-app.md.
+name: iPhone app to TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the app's screens (same code as the web app)
+        run: |
+          test -n "$NEXT_PUBLIC_PAXEN_API_URL" || { echo "Set the PAXEN_API_URL repository variable (your Railway API URL)"; exit 1; }
+          pnpm build
+        env:
+          MOBILE_BUILD: "1"
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL }}
+      - run: npx cap sync ios
+
+      - name: App Store Connect API key
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+
+      - name: Build and sign
+        working-directory: web/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Upload to TestFlight
+        working-directory: web/ios/App
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Paxen.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Remove the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

@@ -25,6 +25,15 @@ def deliver(user: User, alert: Alert) -> str:
         alert.delivered = {"sent": "push", "gone": "push_gone"}.get(res, "push_failed")
         return alert.delivered
     token = user.push_token or ""
+    if token.startswith("apns:"):  # the iPhone app (web/ios)
+        from .apns import send as apns_send
+
+        res = apns_send(token, alert.data.get("push_title") or alert.title, f"{alert.body}\nForecast confidence: {conf}",
+                        {"alert_id": alert.id, "url": "/?tab=alerts"})
+        if res == "gone":
+            user.push_token = None
+        alert.delivered = {"sent": "push", "gone": "push_gone"}.get(res, "push_failed")
+        return alert.delivered
     if not token.startswith("ExponentPushToken"):
         alert.delivered = "inbox"
         return alert.delivered

@@ -49,7 +49,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, s
             data-value={o.value}
             onClick={() => onChange(o.value)}
             className={cn(
-              'h-10 shrink-0 whitespace-nowrap rounded-px-sm px-3 transition-colors',
+              'h-11 shrink-0 whitespace-nowrap rounded-px-sm px-3 transition-colors',
               scroll ? 'rounded-full border px-4' : 'flex-1',
               selected
                 ? scroll

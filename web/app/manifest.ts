@@ -1,6 +1,8 @@
 import type { MetadataRoute } from 'next'
 import { palettes } from '@/lib/paxen-tokens'
 
+export const dynamic = 'force-static'
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'Paxen',

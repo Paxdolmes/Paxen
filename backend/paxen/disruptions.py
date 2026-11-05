@@ -26,7 +26,6 @@ import statistics
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 
 DATA_FILE = Path(__file__).with_name("data") / "disruption_clearance.json"

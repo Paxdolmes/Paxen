@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { IS_DEMO } from '@/lib/api'
 import { revalidateAll, useActiveTrip, useDashboard, useToken } from '@/lib/hooks'
-import { registerWorker } from '@/lib/push'
+import { initNativePush, registerWorker } from '@/lib/push'
 import { AppHeader, Wordmark } from './app-header'
 import { AlertsScreen } from './screens/alerts-screen'
 import { NetworkScreen } from './screens/network-screen'
@@ -36,6 +36,8 @@ export function PaxenApp() {
   useEffect(() => {
     // keep the notification worker current once someone has allowed notifications
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') registerWorker().catch(() => {})
+    // iPhone app: tapping an alert notification opens the screen it points to
+    initNativePush((url) => window.location.assign(url)).catch(() => {})
   }, [])
 
   useEffect(() => {

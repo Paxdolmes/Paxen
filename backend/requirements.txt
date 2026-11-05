@@ -2,7 +2,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 SQLAlchemy>=2.0
 psycopg[binary]>=3.2
-httpx>=0.27
+httpx[http2]>=0.27  # http2: Apple's push service (paxen/apns.py)
 pydantic>=2.7
 tzdata>=2024.1
 boto3>=1.34  # S3/R2 raw archive (PAXEN_ARCHIVE_URL=s3://...)

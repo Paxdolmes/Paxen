@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Gauge } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { CONFIDENCE_LABELS } from '@/lib/format'
+import { CONFIDENCE_PLAIN } from '@/lib/plain'
 import type { Confidence } from '@/lib/types'
 import { Button } from '../primitives/button'
 import { Sheet } from '../primitives/sheet'
@@ -15,30 +15,30 @@ const toneClass: Record<Confidence, string> = {
   low: 'bg-px-surface-sunken text-px-text-secondary',
 }
 
-const meaning: Record<Confidence, string> = {
-  high: 'The forecast range is narrow — live arrivals and our model agree.',
-  medium: 'Usually right, but the range is moderate. Allow a few minutes either way.',
-  low: 'The range is wide. Things could go faster or slower than the middle estimate.',
-}
-
 export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
   const [open, setOpen] = useState(false)
+  const { label, meaning } = CONFIDENCE_PLAIN[confidence]
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={cn('inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2.5', toneClass[confidence])}
-        style={{ ...textStyle('caption'), fontWeight: 600 }}
+        className="-my-2.5 inline-flex min-h-11 shrink-0 items-center"
         aria-haspopup="dialog"
+        aria-label={`${label}. Tap to learn what this means.`}
       >
-        <Gauge className="size-3.5" aria-hidden />
-        {CONFIDENCE_LABELS[confidence]} confidence
+        <span
+          className={cn('inline-flex h-7 items-center gap-1 rounded-full px-3', toneClass[confidence])}
+          style={{ ...textStyle('caption'), fontWeight: 600 }}
+        >
+          <Gauge className="size-3.5" aria-hidden />
+          {label}
+        </span>
       </button>
       <Sheet
         open={open}
         onClose={() => setOpen(false)}
-        title={`${CONFIDENCE_LABELS[confidence]} confidence`}
+        title={label}
         footer={
           <Button variant="secondary" block onClick={() => setOpen(false)}>
             Got it
@@ -46,10 +46,10 @@ export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
         }
       >
         <Text variant="body" className="text-pretty">
-          {meaning[confidence]}
+          {meaning}
         </Text>
         <Text variant="subhead" tone="secondary" className="text-pretty">
-          Based on live arrivals, our correction model and today&apos;s disruption. Low means the range is wide.
+          Based on live arrivals, what usually happens on this route, and today&apos;s disruption.
         </Text>
       </Sheet>
     </>

@@ -7,11 +7,11 @@ export const commuteStatusMeta: Record<
   CommuteStatus,
   { label: string; tone: ChipTone; headerClass: string; icon: typeof CircleCheck }
 > = {
-  normal: { label: 'Normal', tone: 'success', headerClass: 'bg-px-success-soft text-px-on-success-soft', icon: CircleCheck },
-  watch: { label: 'Watch', tone: 'watch', headerClass: 'bg-px-watch-soft text-px-on-watch-soft', icon: TriangleAlert },
-  slower: { label: 'Slower', tone: 'attention', headerClass: 'bg-px-attention-soft text-px-on-attention-soft', icon: CircleAlert },
+  normal: { label: 'All good', tone: 'success', headerClass: 'bg-px-success-soft text-px-on-success-soft', icon: CircleCheck },
+  watch: { label: 'Keep an eye on it', tone: 'watch', headerClass: 'bg-px-watch-soft text-px-on-watch-soft', icon: TriangleAlert },
+  slower: { label: 'Slower than usual', tone: 'attention', headerClass: 'bg-px-attention-soft text-px-on-attention-soft', icon: CircleAlert },
   disrupted: { label: 'Disrupted', tone: 'attentionStrong', headerClass: 'bg-px-attention text-px-on-attention', icon: CircleAlert },
-  unknown: { label: 'Learning', tone: 'neutral', headerClass: 'bg-px-surface-sunken text-px-text', icon: CircleHelp },
+  unknown: { label: 'Still learning', tone: 'neutral', headerClass: 'bg-px-surface-sunken text-px-text', icon: CircleHelp },
 }
 
 export function CommuteStatusPill({ status }: { status: CommuteStatus }) {

@@ -1,7 +1,13 @@
 import { ImageResponse } from 'next/og'
 import { palettes } from '@/lib/paxen-tokens'
 
-const ALLOWED = new Set([180, 192, 512])
+const ALLOWED = new Set([180, 192, 512, 1024])
+
+// Pre-rendered at build time (also lets the iPhone app's static build include them)
+export const dynamic = 'force-static'
+export function generateStaticParams() {
+  return [...ALLOWED].map((size) => ({ size: String(size) }))
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ size: string }> }) {
   const { size: raw } = await params

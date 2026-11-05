@@ -14,38 +14,41 @@ import { TimeField } from '../primitives/controls'
 import { Segmented } from '../primitives/segmented'
 import { Text, textStyle } from '../primitives/text'
 
-type Step = 'welcome' | 'home' | 'work' | 'routine'
-const STEPS: Step[] = ['home', 'work', 'routine']
+type Step = 'welcome' | 'places' | 'routine'
+const STEPS: Step[] = ['places', 'routine']
 
 function Progress({ step }: { step: Step }) {
   const i = STEPS.indexOf(step)
   return (
-    <div className="flex items-center gap-1.5" aria-label={`Step ${i + 1} of ${STEPS.length}`} role="img">
-      {STEPS.map((s, j) => (
-        <span key={s} className={`h-1.5 flex-1 rounded-full ${j <= i ? 'bg-px-brand' : 'bg-px-border'}`} />
-      ))}
+    <div className="flex flex-1 items-center gap-3">
+      <div className="flex flex-1 items-center gap-1.5" aria-hidden>
+        {STEPS.map((s, j) => (
+          <span key={s} className={`h-1.5 flex-1 rounded-full ${j <= i ? 'bg-px-brand' : 'bg-px-border'}`} />
+        ))}
+      </div>
+      <Text variant="footnote" tone="secondary" className="shrink-0 tabular">
+        Step {i + 1} of {STEPS.length}
+      </Text>
     </div>
   )
 }
 
-function Welcome({ onStart, name, setName, busy, error }: {
+function Welcome({ onStart, busy, error }: {
   onStart: () => void
-  name: string
-  setName: (v: string) => void
   busy: boolean
   error: string | null
 }) {
   const points = [
-    { icon: Gauge, text: 'Learns your normal Home → Work and Work → Home trips.' },
-    { icon: BellRing, text: 'Tells you before you leave when today isn’t normal — and what to take instead.' },
-    { icon: ShieldCheck, text: 'No account details, no background location.' },
+    { icon: Gauge, text: 'Learns your usual trip to work and back.' },
+    { icon: BellRing, text: 'Tells you before you leave if today is different, and what to take instead.' },
+    { icon: ShieldCheck, text: 'No account to create. Location is only used during a live trip, never stored.' },
   ]
   return (
     <div className="flex flex-1 flex-col gap-8 pt-10">
       <div className="flex flex-col gap-4">
         <Wordmark size={36} />
         <Text variant="display" as="h1" className="text-balance">
-          Know when your normal commute is not normal.
+          Know before you leave if your commute is off.
         </Text>
       </div>
       <ul className="flex flex-col gap-4">
@@ -60,23 +63,6 @@ function Welcome({ onStart, name, setName, busy, error }: {
           </li>
         ))}
       </ul>
-      <div className="flex flex-col gap-2">
-        <label htmlFor="ob-name">
-          <Text variant="subhead" as="span" tone="secondary">
-            What should we call you? <span className="text-px-text-tertiary">(optional)</span>
-          </Text>
-        </label>
-        <input
-          id="ob-name"
-          autoComplete="given-name"
-          value={name}
-          maxLength={40}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="First name"
-          className="h-14 w-full rounded-px-md border border-px-border-strong bg-px-surface px-4 text-px-text placeholder:text-px-text-tertiary"
-          style={textStyle('body')}
-        />
-      </div>
       <div className="mt-auto flex flex-col gap-2 pb-4">
         {error && (
           <Text variant="footnote" tone="attention" role="alert">
@@ -86,14 +72,16 @@ function Welcome({ onStart, name, setName, busy, error }: {
         <Button block onClick={onStart} loading={busy}>
           Get started
         </Button>
+        <Text variant="footnote" tone="secondary" className="text-center">
+          Takes about a minute.
+        </Text>
       </div>
     </div>
   )
 }
 
 export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onDone: () => void }) {
-  const [step, setStep] = useState<Step>(() => (tokenStore.get() ? 'home' : 'welcome'))
-  const [name, setName] = useState('')
+  const [step, setStep] = useState<Step>(() => (tokenStore.get() ? 'places' : 'welcome'))
   const [home, setHomePlace] = useState<PlaceSearchResult | null>(null)
   const [work, setWorkPlace] = useState<PlaceSearchResult | null>(null)
   const [homeStops, setHomeStops] = useState<ChosenStop[]>([])
@@ -119,7 +107,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
         onStart()
         tokenStore.set(token)
       }
-      setStep('home')
+      setStep('places')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not get started.')
     } finally {
@@ -133,7 +121,6 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
     setError(null)
     try {
       await api.onboarding({
-        name: name.trim() || undefined,
         home: { label: 'home', name: home.name, lat: home.lat, lon: home.lon, source: 'manual', stops: homeStops },
         work: { label: 'work', name: work.name, lat: work.lat, lon: work.lon, source: 'manual', stops: workStops },
         days,
@@ -149,17 +136,17 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
     }
   }
 
-  const back = () => setStep(step === 'routine' ? 'work' : step === 'work' ? 'home' : 'home')
+  const back = () => setStep('places')
   const invalidRoutine = days.length === 0 || mStart >= mEnd || eStart >= eEnd
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col bg-px-canvas px-5 pb-safe pt-safe">
       {step === 'welcome' ? (
-        <Welcome onStart={start} name={name} setName={setName} busy={busy} error={error} />
+        <Welcome onStart={start} busy={busy} error={error} />
       ) : (
         <div className="flex flex-1 flex-col gap-6 pt-4">
           <div className="flex items-center gap-3">
-            {step !== 'home' ? (
+            {step === 'routine' ? (
               <button
                 type="button"
                 onClick={back}
@@ -169,7 +156,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                 <ArrowLeft className="size-5" aria-hidden />
               </button>
             ) : (
-              <span className="size-11 -ml-2 flex items-center">
+              <span className="flex h-11 shrink-0 items-center">
                 <Wordmark size={20} />
               </span>
             )}
@@ -178,36 +165,29 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
             </div>
           </div>
 
-          {step === 'home' && (
-            <section className="flex flex-col gap-5" aria-labelledby="ob-home">
+          {step === 'places' && (
+            <section className="flex flex-col gap-6" aria-labelledby="ob-places">
               <div className="flex flex-col gap-2">
-                <Text variant="title1" as="h1" id="ob-home">
-                  Where&apos;s home?
+                <Text variant="title1" as="h1" id="ob-places">
+                  Where do you commute?
                 </Text>
                 <Text variant="callout" tone="secondary" className="text-pretty">
-                  Paxen only stores your places to ~10 m precision. You can edit or delete them any time.
+                  A station name or postcode is enough. You can change this later.
                 </Text>
               </div>
-              <PlaceSearch label="Search for home" placeholder="Address, postcode or station" selected={home} onSelect={setHome} autoFocus />
+              <div className="flex flex-col gap-4">
+                <PlaceSearch label="Home" placeholder="Home: station or postcode" selected={home} onSelect={setHome} autoFocus />
+                {home && (
+                  <StopPicker lat={home.lat} lon={home.lon} value={homeStops} onChange={setHomeStops} placeLabel="home" />
+                )}
+              </div>
               {home && (
-                <StopPicker lat={home.lat} lon={home.lon} value={homeStops} onChange={setHomeStops} placeLabel="home" />
-              )}
-            </section>
-          )}
-
-          {step === 'work' && (
-            <section className="flex flex-col gap-5" aria-labelledby="ob-work">
-              <div className="flex flex-col gap-2">
-                <Text variant="title1" as="h1" id="ob-work">
-                  And where do you work?
-                </Text>
-                <Text variant="callout" tone="secondary" className="text-pretty">
-                  Paxen only stores your places to ~10 m precision. You can edit or delete them any time.
-                </Text>
-              </div>
-              <PlaceSearch label="Search for work" placeholder="Address, postcode or station" selected={work} onSelect={setWork} autoFocus />
-              {work && (
-                <StopPicker lat={work.lat} lon={work.lon} value={workStops} onChange={setWorkStops} placeLabel="work" />
+                <div className="flex flex-col gap-4">
+                  <PlaceSearch label="Work" placeholder="Work: station or postcode" selected={work} onSelect={setWork} autoFocus />
+                  {work && (
+                    <StopPicker lat={work.lat} lon={work.lon} value={workStops} onChange={setWorkStops} placeLabel="work" />
+                  )}
+                </div>
               )}
             </section>
           )}
@@ -219,7 +199,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                   Your routine
                 </Text>
                 <Text variant="callout" tone="secondary" className="text-pretty">
-                  No background location needed — we use your schedule.
+                  We&apos;ve filled in a typical commute. Change anything that&apos;s off.
                 </Text>
               </div>
               <fieldset className="flex flex-col">
@@ -243,7 +223,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
               <fieldset className="flex flex-col">
                 <legend className="mb-2">
                   <Text variant="subhead" as="span" tone="secondary">
-                    Morning · leave home between
+                    Morning: leave home between
                   </Text>
                 </legend>
                 <div className="flex gap-3">
@@ -254,7 +234,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
               <fieldset className="flex flex-col">
                 <legend className="mb-2">
                   <Text variant="subhead" as="span" tone="secondary">
-                    Evening · leave work between
+                    Evening: leave work between
                   </Text>
                 </legend>
                 <div className="flex gap-3">
@@ -264,10 +244,10 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
               </fieldset>
               <div className="flex flex-col gap-2">
                 <Text variant="subhead" tone="secondary">
-                  Route preference
+                  What matters most?
                 </Text>
                 <Segmented
-                  label="Route preference"
+                  label="What matters most"
                   value={pref}
                   scroll
                   options={PREFERENCES.map((p) => ({ value: p, label: PREFERENCE_LABELS[p] }))}
@@ -276,7 +256,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
               </div>
               {invalidRoutine && (
                 <Text variant="footnote" tone="watch">
-                  Pick at least one day, and make each window end after it starts.
+                  Pick at least one day, and make sure each window ends after it starts.
                 </Text>
               )}
             </section>
@@ -288,19 +268,14 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                 {error}
               </Text>
             )}
-            {step === 'home' && (
-              <Button block disabled={!home} onClick={() => setStep('work')}>
-                Continue
-              </Button>
-            )}
-            {step === 'work' && (
-              <Button block disabled={!work} onClick={() => setStep('routine')}>
+            {step === 'places' && (
+              <Button block disabled={!home || !work} onClick={() => setStep('routine')}>
                 Continue
               </Button>
             )}
             {step === 'routine' && (
               <Button block disabled={invalidRoutine} loading={busy} onClick={submit}>
-                Start monitoring
+                Done, show my commute
               </Button>
             )}
           </div>

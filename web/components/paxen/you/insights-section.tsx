@@ -121,9 +121,9 @@ export function InsightsSection() {
           <Stat label="Minutes saved" value={String(Math.round(p.minutes_saved))} />
           <Stat label="Alerts rated useful" value={ratedUseful} />
           <Stat
-            label="Forecast hit rate"
+            label="Trips as predicted"
             value={p.interval_hit_rate != null ? fmtPct(p.interval_hit_rate) : '—'}
-            hint={p.interval_hit_rate != null ? 'Arrived within our range' : 'Learning your routine'}
+            hint={p.interval_hit_rate != null ? 'Arrived in the time we gave' : 'Still learning your routine'}
           />
         </div>
       </Card>
@@ -131,27 +131,27 @@ export function InsightsSection() {
       <Card className="flex flex-col gap-4 p-5">
         <div className="flex flex-col gap-1">
           <Text variant="headline" as="h3">
-            Arrival predictions
+            How accurate are arrival times?
           </Text>
           <Text variant="footnote" tone="secondary" className="text-pretty">
-            Live countdowns tend to under-estimate long waits. Paxen measures what actually happened and corrects for it.
+            Live countdowns can be too optimistic for long waits. Paxen checks what really happened and adjusts.
           </Text>
         </div>
 
         {m.status === 'no_model' || !m.provider || !m.corrected ? (
           <Text variant="callout" tone="secondary">
-            {m.message ?? 'Still collecting arrivals to train the correction model.'}
+            {m.message ?? 'Still collecting data. Check back soon.'}
           </Text>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2">
               <Stat
-                label="Countdown error"
+                label="Usual countdown is off by"
                 value={m.provider.mae_s != null ? `${Math.round(m.provider.mae_s)} s` : '—'}
                 hint={m.provider.within_2m != null ? `${fmtPct(m.provider.within_2m)} within 2 min` : undefined}
               />
               <Stat
-                label="Paxen error"
+                label="Paxen is off by"
                 value={m.corrected.mae_s != null ? `${Math.round(m.corrected.mae_s)} s` : '—'}
                 hint={m.corrected.within_2m != null ? `${fmtPct(m.corrected.within_2m)} within 2 min` : undefined}
               />
@@ -163,8 +163,7 @@ export function InsightsSection() {
               </>
             )}
             <Text variant="caption" tone="tertiary">
-              Based on {m.corrected.n.toLocaleString('en-GB')} observed arrivals
-              {m.status === 'shadow' ? ' · running in shadow mode' : ''}.
+              Based on {m.corrected.n.toLocaleString('en-GB')} real arrivals.
             </Text>
           </>
         )}

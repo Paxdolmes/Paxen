@@ -177,6 +177,7 @@ export const api = {
   pushKey: () => request<{ public_key: string }>('GET', '/v1/push/key'),
   subscribePush: (subscription: PushSubscriptionJSON) => request<User>('POST', '/v1/push/subscribe', { subscription }),
   unsubscribePush: () => request<User>('DELETE', '/v1/push/subscribe'),
+  setPushToken: (push_token: string | null) => request<User>('PATCH', '/v1/me', { push_token }),
   testPush: () => request<{ result: 'sent' | 'gone' | 'failed' }>('POST', '/v1/push/test'),
   deleteMe: () => request<unknown>('DELETE', '/v1/me'),
   deleteHistory: () => request<{ trips_deleted: number; alerts_deleted: number }>('DELETE', '/v1/me/history'),
