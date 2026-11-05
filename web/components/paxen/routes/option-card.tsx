@@ -19,10 +19,11 @@ import { CrowdingChip } from '../transit/status'
 function vsUsual(min: number | null, isUsual: boolean) {
   if (isUsual || min == null) return null
   const m = Math.round(min)
-  if (m === 0) return { text: 'Same as usual', tone: 'secondary' as const }
+  // compared with the usual route as it is today (not with a normal day)
+  if (m === 0) return { text: 'Same as your usual route today', tone: 'secondary' as const }
   return m < 0
-    ? { text: `${Math.abs(m)} min faster than usual`, tone: 'success' as const }
-    : { text: `${m} min slower than usual`, tone: 'secondary' as const }
+    ? { text: `${Math.abs(m)} min faster than your usual route today`, tone: 'success' as const }
+    : { text: `${m} min slower than your usual route today`, tone: 'secondary' as const }
 }
 
 export function OptionCard({

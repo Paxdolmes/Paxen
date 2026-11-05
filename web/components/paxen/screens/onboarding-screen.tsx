@@ -41,7 +41,7 @@ function Welcome({ onStart, busy, error }: {
   const points = [
     { icon: Gauge, text: 'Learns your usual trip to work and back.' },
     { icon: BellRing, text: 'Tells you before you leave if today is different, and what to take instead.' },
-    { icon: ShieldCheck, text: 'No account to create. We never track your location.' },
+    { icon: ShieldCheck, text: 'No account to create. Location is only used during a live trip, never stored.' },
   ]
   return (
     <div className="flex flex-1 flex-col gap-8 pt-10">
@@ -156,7 +156,7 @@ export function OnboardingScreen({ onStart, onDone }: { onStart: () => void; onD
                 <ArrowLeft className="size-5" aria-hidden />
               </button>
             ) : (
-              <span className="size-11 -ml-2 flex items-center">
+              <span className="flex h-11 shrink-0 items-center">
                 <Wordmark size={20} />
               </span>
             )}
