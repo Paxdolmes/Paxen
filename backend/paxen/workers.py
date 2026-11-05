@@ -80,7 +80,7 @@ def monitor_tick() -> int:
                     _aq_day = today
             except Exception:
                 log.exception("air quality recording failed")
-        fresh = feed_health(s, now)["fresh"]
+        fresh = feed_health(s, now, counts=False)["fresh"]
         try:
             from .live import close_stale
 

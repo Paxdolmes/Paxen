@@ -140,3 +140,27 @@ def test_per_stop_raw_responses_go_to_the_archive_in_one_object(session, tmp_pat
     snaps = session.scalars(select(RawSnapshot).where(RawSnapshot.endpoint.like("%StopPoint%"))).all()
     assert len(snaps) == 2 and all(s.payload is None and s.archive_key for s in snaps)
     assert len(list(tmp_path.rglob("stops-*.json.gz"))) == 1
+
+
+def test_replay_matches_live_inference(session):
+    """python -m paxen.reinfer replays history after it is all recorded; each step only reads data up to its own
+    time (for memory), and must still give what the live recorder gave."""
+    import paxen.recorder as rec
+    from paxen.reinfer import reinfer
+
+    p = SimProvider("normal")
+    rec.SAMPLER = LeadSampler()
+    t, end = MORNING - timedelta(minutes=30), MORNING
+    while t <= end:
+        rec.record_network(session, p, "tube", t, {}, sampler=rec.SAMPLER)
+        rec.infer_arrivals(session, "sim", t)
+        session.commit()
+        t += timedelta(seconds=30)
+    live = sorted(session.execute(select(ObservedArrival.stop_id, ObservedArrival.vehicle_id,
+                                         ObservedArrival.arrived_at)).all())
+    assert live
+    reinfer(session, "sim")
+    replay = sorted(session.execute(select(ObservedArrival.stop_id, ObservedArrival.vehicle_id,
+                                           ObservedArrival.arrived_at)).all())
+    assert {r for r in replay if r[2] <= end.replace(tzinfo=None) - timedelta(minutes=2)} == \
+        {r for r in live if r[2] <= end.replace(tzinfo=None) - timedelta(minutes=2)}
