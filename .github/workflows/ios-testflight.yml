@@ -30,12 +30,12 @@ jobs:
 
       - name: Build the app's screens (same code as the web app)
         run: |
-          test -n "$NEXT_PUBLIC_PAXEN_API_URL" || { echo "Set the PAXEN_API_URL repository variable (your Railway API URL)"; exit 1; }
           pnpm build
         env:
           MOBILE_BUILD: "1"
           NEXT_TELEMETRY_DISABLED: "1"
-          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL }}
+          # the live API (not secret: the web app uses the same address); a PAXEN_API_URL repository variable overrides it
+          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
       - run: npx cap sync ios
 
       - name: App Store Connect API key

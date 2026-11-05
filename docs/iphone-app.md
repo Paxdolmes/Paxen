@@ -21,7 +21,7 @@ Xcode project and `APNS_TOPIC` together if you need a different one).
    is at https://developer.apple.com/account (Membership details).
 5. **GitHub** (https://github.com/Paxdolmes/Paxen/settings/secrets/actions):
    - Secrets: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY` (the whole API-key `.p8` file's text), `APPLE_TEAM_ID`.
-   - Variables tab: `PAXEN_API_URL` = your Railway API URL (as in Vercel's `NEXT_PUBLIC_PAXEN_API_URL`).
+   - Optional, Variables tab: `PAXEN_API_URL`, only if the API moves from https://paxen-production.up.railway.app.
 6. **Railway**, on both **api** and **worker**: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` (the push key's
    `.p8` text), and optionally `APNS_TOPIC` if the bundle id differs. Redeploy.
 
