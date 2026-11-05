@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { Ban, ChevronDown, Footprints, Pin, Play, Repeat2 } from 'lucide-react'
-import { fmtMin, fmtPct, fmtTime, fareLabel } from '@/lib/format'
+import { fmtMin, fmtTime, fareLabel } from '@/lib/format'
+import { crowdingWords, newDelayRiskWords, onTimeWords, waitBasisHint } from '@/lib/plain'
 import type { RouteOption } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { Button } from '../primitives/button'
@@ -10,6 +11,7 @@ import { Card, Divider } from '../primitives/card'
 import { Chip } from '../primitives/chip'
 import { Text } from '../primitives/text'
 import { ConfidenceBadge } from '../transit/confidence-badge'
+import { DisruptionNote } from '../transit/disruption-note'
 import { LineChip, ModeIcon } from '../transit/line-chip'
 import { RangeBar, type TimeAxis } from '../transit/range-bar'
 import { CrowdingChip } from '../transit/status'
@@ -20,7 +22,7 @@ function vsUsual(min: number | null, isUsual: boolean) {
   if (m === 0) return { text: 'Same as usual', tone: 'secondary' as const }
   return m < 0
     ? { text: `${Math.abs(m)} min faster than usual`, tone: 'success' as const }
-    : { text: `+${m} min vs usual`, tone: 'secondary' as const }
+    : { text: `${m} min slower than usual`, tone: 'secondary' as const }
 }
 
 export function OptionCard({
@@ -44,6 +46,8 @@ export function OptionCard({
   const transit = option.legs.filter((l) => l.mode !== 'walking')
   const vs = vsUsual(option.vs_usual_min, option.is_usual)
   const off = !option.feasible
+  const onTime = onTimeWords(option.on_time_chance)
+  const riskText = newDelayRiskWords(option.disruption_risk)
   const panelId = `opt-${option.id.replace(/[^a-z0-9]/gi, '')}`
 
   return (
@@ -107,8 +111,8 @@ export function OptionCard({
               axis={axis}
               tone={option.is_recommended ? 'brand' : option.disruptions.length ? 'attention' : 'muted'}
             />
-            <Text variant="caption" tone="tertiary" tabular>
-              {fmtTime(option.arrive_range[0])}–{fmtTime(option.arrive_range[1])} likely
+            <Text variant="caption" tone="secondary" tabular>
+              Likely between {fmtTime(option.arrive_range[0])} and {fmtTime(option.arrive_range[1])}
             </Text>
           </div>
         )}
@@ -118,7 +122,17 @@ export function OptionCard({
           <Meta icon={<Repeat2 className="size-3.5" aria-hidden />}>
             {option.changes === 0 ? 'Direct' : `${option.changes} change${option.changes > 1 ? 's' : ''}`}
           </Meta>
-          {!off && <Meta>{fmtPct(option.on_time_chance)} on-time chance</Meta>}
+          {!off && onTime && (
+            <span
+              className={cn(
+                onTime.tone === 'success' && 'text-px-success',
+                onTime.tone === 'watch' && 'text-px-watch',
+                onTime.tone === 'attention' && 'text-px-attention',
+              )}
+            >
+              <Meta>{onTime.text}</Meta>
+            </span>
+          )}
           {option.reliability && <Meta>{option.reliability.label}</Meta>}
           {option.fare && <Meta>{fareLabel(option.fare)}</Meta>}
         </div>
@@ -130,11 +144,13 @@ export function OptionCard({
           <CrowdingChip crowding={option.crowding} />
         </div>
         {option.disruptions.map((d) => (
-          <Text key={d.line_id} variant="footnote" tone="attention" className="text-pretty">
-            <span style={{ fontWeight: 600 }}>{d.line_name}:</span> {d.description}
-            {d.reason ? ` — ${d.reason}` : ''}
-          </Text>
+          <DisruptionNote key={d.line_id} disruption={d} />
         ))}
+        {riskText && !off && (
+          <Text variant="footnote" tone="secondary" className="text-pretty">
+            {riskText}
+          </Text>
+        )}
       </div>
 
       {open && (
@@ -162,8 +178,8 @@ export function OptionCard({
                       </Text>
                       <Text variant="footnote" tone="secondary" tabular>
                         Wait {fmtMin(leg.wait_min)} · ride {fmtMin(leg.ride_min)} ·{' '}
-                        <span className={leg.live ? 'text-px-success' : undefined} style={{ fontWeight: 600 }}>
-                          {leg.live ? 'Live' : 'Scheduled'}
+                        <span className={waitBasisHint(leg).live ? 'text-px-success' : undefined} style={{ fontWeight: 600 }}>
+                          {waitBasisHint(leg).label}
                         </span>
                       </Text>
                     </>
@@ -173,8 +189,8 @@ export function OptionCard({
             ))}
           </ol>
           {option.crowding.basis && (
-            <Text variant="caption" tone="tertiary">
-              Crowding is an estimate · {option.crowding.basis}
+            <Text variant="caption" tone="secondary">
+              {crowdingWords(option.crowding.basis)}
             </Text>
           )}
           {!off && (
@@ -205,7 +221,7 @@ export function OptionCard({
 
 function Meta({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 tabular" style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500 }}>
+    <span className="inline-flex items-center gap-1 tabular" style={{ fontSize: 14, lineHeight: '20px', fontWeight: 500 }}>
       {icon}
       {children}
     </span>

@@ -176,8 +176,8 @@ export const type: Record<TypeVariant, TypeStyle> = {
   bodyStrong: { fontSize: 16, lineHeight: 24, fontWeight: 600, letterSpacing: -0.1 },
   callout: { fontSize: 15, lineHeight: 22, fontWeight: 500, letterSpacing: -0.1 },
   subhead: { fontSize: 14, lineHeight: 20, fontWeight: 400, letterSpacing: 0 },
-  footnote: { fontSize: 13, lineHeight: 18, fontWeight: 400, letterSpacing: 0 },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: 500, letterSpacing: 0.2 },
+  footnote: { fontSize: 14, lineHeight: 20, fontWeight: 400, letterSpacing: 0 },
+  caption: { fontSize: 13, lineHeight: 17, fontWeight: 500, letterSpacing: 0.1 },
 }
 
 export interface ShadowToken {

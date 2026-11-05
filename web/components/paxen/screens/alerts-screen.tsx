@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { BellOff, ThumbsDown, ThumbsUp, Target } from 'lucide-react'
 import { mutate as globalMutate } from 'swr'
 import { api } from '@/lib/api'
-import { CONFIDENCE_LABELS, fmtAgo } from '@/lib/format'
+import { fmtAgo } from '@/lib/format'
+import { CONFIDENCE_PLAIN } from '@/lib/plain'
 import { useAlerts } from '@/lib/hooks'
 import type { Alert } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -17,7 +18,7 @@ type Feedback = NonNullable<Alert['feedback']>
 const FEEDBACK: { value: Feedback; label: string; icon: typeof ThumbsUp }[] = [
   { value: 'useful', label: 'Useful', icon: ThumbsUp },
   { value: 'not_useful', label: 'Not useful', icon: ThumbsDown },
-  { value: 'inaccurate', label: 'Inaccurate', icon: Target },
+  { value: 'inaccurate', label: 'Wrong', icon: Target },
 ]
 
 function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedback) => Promise<void> }) {
@@ -51,17 +52,16 @@ function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedba
             Paxen
           </Text>
         </span>
-        <Text variant="caption" tone="tertiary">
+        <Text variant="caption" tone="secondary">
           <time dateTime={alert.created_at}>{fmtAgo(alert.created_at)}</time>
         </Text>
       </div>
       <div className="flex flex-col gap-1">
         <Text
-          variant="footnote"
+          variant="headline"
           as="h3"
           tone={alert.kind === 'usual_unavailable' ? 'attention' : 'primary'}
-          className="uppercase"
-          style={{ fontWeight: 700, letterSpacing: 0.5 }}
+          className="text-balance"
         >
           {alert.title}
         </Text>
@@ -69,7 +69,7 @@ function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedba
           {alert.body}
         </Text>
         <Text variant="footnote" tone="secondary">
-          Forecast confidence: {CONFIDENCE_LABELS[alert.confidence]}
+          {CONFIDENCE_PLAIN[alert.confidence].label}
         </Text>
       </div>
       <div className="flex flex-wrap gap-2" role="group" aria-label="Was this alert helpful?">
@@ -83,14 +83,14 @@ function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedba
               disabled={pending !== null}
               onClick={() => send(value)}
               className={cn(
-                'inline-flex h-9 items-center gap-1.5 rounded-full border px-3 transition-colors disabled:opacity-60',
+                'inline-flex h-11 items-center gap-1.5 rounded-full border px-4 transition-colors disabled:opacity-60',
                 selected
                   ? 'border-px-brand bg-px-brand text-px-on-brand'
                   : 'border-px-border-strong bg-px-surface text-px-text hover:bg-px-surface-sunken',
               )}
-              style={{ fontSize: 13, fontWeight: 600 }}
+              style={{ fontSize: 14, fontWeight: 600 }}
             >
-              <Icon className="size-3.5" aria-hidden />
+              <Icon className="size-4" aria-hidden />
               {label}
             </button>
           )
@@ -141,8 +141,8 @@ export function AlertsScreen() {
       ) : data.length === 0 ? (
         <EmptyState
           icon={<BellOff className="size-6" aria-hidden />}
-          title="No alerts — that's a good thing"
-          body="Paxen only alerts you when your usual route is materially slower and an alternative is clearly better, or the risk of being late is significant. You can tune this in You → Alerts."
+          title="Nothing to report"
+          body="We'll only message you when your usual route is slower than normal or you're likely to be late. You can change this in You → Alerts."
         />
       ) : (
         <ul className="flex flex-col gap-3">

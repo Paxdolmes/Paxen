@@ -1,6 +1,7 @@
 import { ChevronRight, Footprints } from 'lucide-react'
 import { Fragment } from 'react'
 import { fmtWait } from '@/lib/format'
+import { waitBasisHint } from '@/lib/plain'
 import type { Leg } from '@/lib/types'
 import { Text } from '../primitives/text'
 import { LineChip } from './line-chip'
@@ -9,6 +10,7 @@ export function LegStrip({ legs, showWait = true, muted }: { legs: Leg[]; showWa
   const firstTransit = legs.findIndex((l) => l.mode !== 'walking')
   const first = firstTransit >= 0 ? legs[firstTransit] : null
   const later = first ? first.next_departures_min.slice(1, 3).map((m) => Math.round(m)) : []
+  const basis = waitBasisHint(first ?? { wait_basis: null, live: false })
 
   return (
     <div className="flex flex-col gap-2">
@@ -45,7 +47,7 @@ export function LegStrip({ legs, showWait = true, muted }: { legs: Leg[]; showWa
           </span>
           {` at ${first.from}`}
           {later.length > 0 && <span className="text-px-text-tertiary">{` · then ${later.join(', ')}`}</span>}
-          {!first.live && <span className="text-px-text-tertiary"> · scheduled</span>}
+          <span className={basis.live ? 'text-px-success' : 'text-px-text-tertiary'}>{` · ${basis.label}`}</span>
         </Text>
       )}
     </div>
