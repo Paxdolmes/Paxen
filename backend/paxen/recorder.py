@@ -11,7 +11,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.orm import Session
 
 from .db import LineStatusSnapshot, ObservedArrival, Prediction, RawSnapshot, WatchedStop
@@ -230,11 +230,13 @@ def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta =
       terminus, or a vehicle id reused by a later trip) — their arrival time is unknowable from this.
     A vehicle is only judged once it has left the board.
     """
-    since = naive_utc(now - lookback)
+    since, until = naive_utc(now - lookback), naive_utc(now)
+    # Upper bound: when python -m paxen.reinfer replays history, everything after `now` is in the table too.
+    # Without it each replay step loaded all later data: quadratic overall, gigabytes per step.
     rows = s.execute(
         select(Prediction.stop_id, Prediction.line_id, Prediction.vehicle_id, Prediction.direction,
                Prediction.polled_at, Prediction.expected_arrival, Prediction.tts_s, Prediction.mode)
-        .where(Prediction.source == source, Prediction.polled_at >= since)
+        .where(Prediction.source == source, Prediction.polled_at >= since, Prediction.polled_at <= until)
         .order_by(Prediction.polled_at)
     ).all()
     if not rows:
@@ -253,13 +255,16 @@ def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta =
     for endpoint, polled in s.execute(
             select(RawSnapshot.endpoint, RawSnapshot.polled_at)
             .where(RawSnapshot.source == source, RawSnapshot.status > 0, RawSnapshot.polled_at >= since,
-                   RawSnapshot.endpoint.like("%/Mode/%/Arrivals"))):
+                   RawSnapshot.polled_at <= until, RawSnapshot.endpoint.like("%/Mode/%/Arrivals"))):
         polls_by_mode[endpoint.rsplit("/Mode/", 1)[1].split("/")[0]].append(polled)
 
     existing: dict[tuple, list[datetime]] = defaultdict(list)
-    for o in s.scalars(select(ObservedArrival).where(ObservedArrival.source == source,
-                                                     ObservedArrival.arrived_at >= since - DEDUPE_WINDOW)):
-        existing[(o.stop_id, o.line_id, o.vehicle_id, o.direction)].append(o.arrived_at)
+    for stop, line, veh, direction, arrived in s.execute(
+            select(ObservedArrival.stop_id, ObservedArrival.line_id, ObservedArrival.vehicle_id,
+                   ObservedArrival.direction, ObservedArrival.arrived_at)
+            .where(ObservedArrival.source == source, ObservedArrival.arrived_at >= since - DEDUPE_WINDOW,
+                   ObservedArrival.arrived_at <= until + DEDUPE_WINDOW)):
+        existing[(stop, line, veh, direction)].append(arrived)
     created = 0
 
     def record(key, est, earliest, latest, quality):
@@ -405,21 +410,31 @@ def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None
     s.commit()
 
 
-def feed_health(s: Session, now: datetime, source: str | None = None) -> dict:
+def _row_count(s: Session, model, source: str | None) -> int:
+    """Exact on SQLite. On Postgres an exact count(*) reads the whole table: with weeks of history that is
+    minutes per call, and this runs on every dashboard load. Use the planner's estimate there (refreshed by
+    autovacuum; production holds a single source)."""
+    if s.get_bind().dialect.name == "postgresql":
+        est = s.scalar(text("SELECT reltuples::bigint FROM pg_class WHERE relname = :t"), {"t": model.__tablename__})
+        return max(int(est or 0), 0)
+    return s.scalar(select(func.count(model.id)).where((model.source == source) if source else True)) or 0
+
+
+def feed_health(s: Session, now: datetime, source: str | None = None, counts: bool = True) -> dict:
     src = (RawSnapshot.source == source) if source else True
     last = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status > 0, src))
     last_err = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status == 0, src))
     age = (aware(now) - aware(last)).total_seconds() if last else None
-    return {
+    out = {
         "last_success_at": aware(last).isoformat() if last else None,
         "last_error_at": aware(last_err).isoformat() if last_err else None,
         "age_s": round(age) if age is not None else None,
         "fresh": age is not None and age < 180,
-        "predictions_recorded": s.scalar(select(func.count(Prediction.id)).where(
-            (Prediction.source == source) if source else True)) or 0,
-        "observed_arrivals": s.scalar(select(func.count(ObservedArrival.id)).where(
-            (ObservedArrival.source == source) if source else True)) or 0,
     }
+    if counts:
+        out.update(predictions_recorded=_row_count(s, Prediction, source),
+                   observed_arrivals=_row_count(s, ObservedArrival, source))
+    return out
 
 
 def purge_source(s: Session, source: str) -> dict:

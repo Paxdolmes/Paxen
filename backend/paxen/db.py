@@ -138,7 +138,9 @@ class Prediction(Base):
     __tablename__ = "predictions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(10))
-    raw_id: Mapped[int | None] = mapped_column(ForeignKey("raw_snapshots.id", ondelete="SET NULL"))
+    # Plain id, deliberately not a foreign key: with one, every raw snapshot deleted by retention made Postgres
+    # scan the whole predictions table (no index on raw_id), so pruning a day took hours.
+    raw_id: Mapped[int | None] = mapped_column(Integer)
     polled_at: Mapped[datetime] = mapped_column(DateTime)
     feed_ts: Mapped[datetime | None] = mapped_column(DateTime)
     stop_id: Mapped[str] = mapped_column(String(40))
@@ -257,3 +259,5 @@ def init_db(eng=None) -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
         for name, table, column in _ADDED_INDEXES:
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"))
+        if eng.dialect.name == "postgresql":  # see Prediction.raw_id
+            conn.execute(text("ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_raw_id_fkey"))
