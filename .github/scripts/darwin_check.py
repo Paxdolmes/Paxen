@@ -45,7 +45,7 @@ def poll_tfl():
 threading.Thread(target=poll_tfl, daemon=True).start()
 c = Consumer({"bootstrap.servers": os.environ["DARWIN_BOOTSTRAP"], "security.protocol": "SASL_SSL",
               "sasl.mechanisms": "PLAIN", "sasl.username": os.environ["DARWIN_USERNAME"],
-              "sasl.password": os.environ["DARWIN_PASSWORD"], "group.id": os.environ.get("DARWIN_GROUP") or "paxen",
+              "sasl.password": os.environ["DARWIN_PASSWORD"], "group.id": "paxen-probe",
               "auto.offset.reset": "latest", "enable.auto.commit": False})
 c.subscribe([os.environ["DARWIN_TOPIC"]])
 start, msgs, actuals = time.time(), 0, {}

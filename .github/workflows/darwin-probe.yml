@@ -1,11 +1,9 @@
-# Checks the Darwin integration live: actual arrivals vs TfL's countdowns (no credentials are printed). Runs when this file or the
-# probe script changes on the working branch, or by hand from the Actions tab.
+# Checks the Darwin integration live: actual arrivals vs TfL's countdowns (no credentials are printed). Run by hand from the
+# Actions tab. It uses its own consumer group, so it never takes Kafka partitions away from the production worker.
 name: Darwin probe
 on:
   workflow_dispatch:
-  push:
-    branches: [claude/dazzling-fermat-yx9bg4]
-    paths: [.github/workflows/darwin-probe.yml, .github/scripts/darwin_check.py]
+concurrency: darwin-probe
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -19,4 +17,3 @@ jobs:
           DARWIN_USERNAME: ${{ secrets.DARWIN_USERNAME }}
           DARWIN_PASSWORD: ${{ secrets.DARWIN_PASSWORD }}
           DARWIN_TOPIC: ${{ secrets.DARWIN_TOPIC }}
-          DARWIN_GROUP: ${{ secrets.DARWIN_GROUP }}

@@ -133,3 +133,24 @@ to being `gbm`.
 **Separate from this protocol:** the journey forecast now also uses NUMBAT frequencies and TfL's timetable for waits
 when there is no live countdown (docs/historical-data.md). That doesn't correct TfL's countdown, so it isn't a
 candidate here. It was checked directly against live arrivals instead.
+
+---
+
+## Amendment 3 (6 November 2026, before any multi-day results; nothing below has been run on recorded data)
+
+Rules 1-4, the ground truth for the headline and Amendments 1-2 are unchanged.
+
+**A3.1 Measured rail truth.** From 6 November the worker records Darwin's actual arrival times for Overground and
+Elizabeth line trains (`paxen/darwin.py`, `ObservedArrival.method = "darwin"`). The match to TfL's predictions needs
+no inference: TfL's vehicle id is Darwin's train id and TfL's rail stop id is `910G` + Darwin's TIPLOC. Darwin's times
+are to the minute, so each arrival is stored as a 59-second window starting at the stated minute.
+
+**A3.2 Reported, never decisive.** The promotion decision stays on Trackernet-measured Tube arrivals only. The same
+protocol (same candidates, rules, purge and intervals) is run separately on Darwin-measured pairs and reported as
+`rail_measured`. It doesn't promote, demote or veto anything. A rail-specific model would need its own amendment,
+written before its results are seen.
+
+**A3.3 Why not merge them.** Rail and Tube errors differ in scale and cause (signalling-based train describers vs
+platform countdowns), and Darwin's minute rounding adds up to ±30 s of noise that Trackernet doesn't have. Pooling
+them would change the headline metric after the protocol was registered.
+
