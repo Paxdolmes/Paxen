@@ -81,7 +81,8 @@ def make_p12(cert_der: bytes, key: rsa.RSAPrivateKey, password: bytes) -> bytes:
 def patch_project(text: str, team: str, profile: str, bundle: str) -> str:
     """Manual distribution signing for the app target's Release configuration only (Swift packages untouched)."""
     # (?:(?!isa = ...).)*? keeps each match inside one build configuration (never runs on from Debug into Release)
-    pattern = re.compile(r"(\{\s*isa = XCBuildConfiguration;\s*buildSettings = \{)((?:(?!isa = XCBuildConfiguration).)*?)"
+    # CocoaPods adds a baseConfigurationReference line before buildSettings, so allow lines in between.
+    pattern = re.compile(r"(\{\s*isa = XCBuildConfiguration;[^{}]*?buildSettings = \{)((?:(?!isa = XCBuildConfiguration).)*?)"
                          r"(\};\s*name = Release;)", re.S)
 
     def fix(m: re.Match) -> str:
