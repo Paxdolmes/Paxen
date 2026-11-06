@@ -35,3 +35,10 @@ automatically. When it's processed (another 5-30 minutes), add yourself in App S
   beta review.
 - If `PAXEN_CORS_ORIGINS` is set, the API still allows the app's origin (`capacitor://localhost`) automatically.
 - Location is asked for only on a live trip (message in `web/ios/App/App/Info.plist`).
+
+## Sharing with friends (public TestFlight link)
+The "TestFlight testers" workflow runs after every build. It keeps the team in the internal "Paxen team" group, and
+adds each new build to the external **Friends** group, which has a public link, then submits it for Apple's beta
+review. The first review takes about a day; later builds are usually approved within hours. Friends install the
+TestFlight app, open the link, and get every new build automatically. Test information and the review contact were
+set on the first run (workflow inputs); the privacy policy is served by the API at `/privacy` (`backend/paxen/privacy.py`).

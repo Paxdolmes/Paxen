@@ -229,6 +229,16 @@ def _feed_fresh(s: Session, t: datetime) -> bool:
 
 
 # --------------------------------------------------------------------------- meta
+@app.get("/privacy", include_in_schema=False)
+def privacy():
+    """The public privacy policy (linked from TestFlight and the app)."""
+    from fastapi.responses import HTMLResponse
+
+    from .privacy import PAGE
+
+    return HTMLResponse(PAGE, headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/v1/health")
 def health(s: Session = Depends(db)):
     p = get_provider()

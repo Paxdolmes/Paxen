@@ -1,8 +1,13 @@
-# TestFlight follow-through: build status, export compliance, and internal testers (see the script's docstring).
-# Runs after every TestFlight upload and by hand from the Actions tab. Needs no Mac.
+# TestFlight follow-through: build status, export compliance, internal testers, and the Friends public link (each new
+# build is added and submitted for beta review). Runs after every TestFlight upload and by hand from the Actions tab.
 name: TestFlight testers
 on:
   workflow_dispatch:
+    inputs:
+      contact_first: {description: "Beta review contact first name (first setup only)", required: false}
+      contact_last: {description: "Beta review contact last name", required: false}
+      contact_phone: {description: "Beta review contact phone", required: false}
+      contact_email: {description: "Beta review contact and feedback email", required: false}
   workflow_run:
     workflows: ["iPhone app to TestFlight"]
     types: [completed]
@@ -21,5 +26,12 @@ jobs:
           echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/AuthKey.p8"
       - run: python .github/scripts/testflight_testers.py
+      - name: Friends (public link)
+        run: python .github/scripts/testflight_external.py
+        env:
+          CONTACT_FIRST: ${{ inputs.contact_first }}
+          CONTACT_LAST: ${{ inputs.contact_last }}
+          CONTACT_PHONE: ${{ inputs.contact_phone }}
+          CONTACT_EMAIL: ${{ inputs.contact_email }}
       - if: always()
         run: rm -f "$ASC_KEY_PATH"
