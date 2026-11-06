@@ -1,0 +1,24 @@
+# TestFlight follow-through: build status, export compliance, and internal testers (see the script's docstring).
+# Runs after every TestFlight upload and by hand from the Actions tab. Needs no Mac.
+name: TestFlight testers
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["iPhone app to TestFlight"]
+    types: [completed]
+jobs:
+  testers:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet cryptography
+      - run: printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$ASC_KEY_PATH"
+      - run: python .github/scripts/testflight_testers.py
+      - if: always()
+        run: rm -f "$ASC_KEY_PATH"
