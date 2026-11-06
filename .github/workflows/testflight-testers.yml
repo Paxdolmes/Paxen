@@ -1,7 +1,10 @@
 # TestFlight follow-through: build status, export compliance, internal testers, and the Friends public link (each new
-# build is added and submitted for beta review). Runs after every TestFlight upload and by hand from the Actions tab.
+# build is added and submitted for beta review). Runs after every TestFlight upload, by hand from the Actions tab, and
+# once a day: Apple reviews one build at a time, so a build that had to wait is submitted on a later day.
 name: TestFlight testers
 on:
+  schedule:
+    - cron: "41 17 * * *"
   workflow_dispatch:
     inputs:
       contact_first: {description: "Beta review contact first name (first setup only)", required: false}
@@ -13,7 +16,7 @@ on:
     types: [completed]
 jobs:
   testers:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
