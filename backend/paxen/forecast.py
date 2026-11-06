@@ -25,6 +25,7 @@ from .timeutil import aware, hour_band, naive_utc
 LEAD_BUCKETS = [(0, 120, "0-2m"), (120, 300, "2-5m"), (300, 600, "5-10m"), (600, 1200, "10-20m"), (1200, 1e9, "20m+")]
 SHRINK_K = 25.0
 MAX_LEAD_S = 1800
+MEASURED = ("trackernet", "darwin")  # ground truth measured by the railway (Tube; Overground and Elizabeth line)
 
 
 def lead_bucket(lead_s: float) -> str:
@@ -118,7 +119,7 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
         err = (arrived - exp).total_seconds()
         if abs(err) > 1800 or (arrived - polled).total_seconds() > MAX_LEAD_S + 900:
             continue  # vehicle id reused by a later trip: not the same journey
-        rank = (1 if method == "trackernet" else 0, quality, -abs(err))
+        rank = (1 if method in MEASURED else 0, quality, -abs(err))
         if pid not in best or rank > best[pid][0]:
             age = (polled - feed_ts).total_seconds() if feed_ts else None
             best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",

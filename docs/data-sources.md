@@ -6,7 +6,7 @@
 | TfL Unified API: `/Line/Mode/{modes}/Status` | disruption categories + reasons | implemented | mapping of all `statusSeverity` codes (see `_SEVERITY`) |
 | TfL Journey Planner: `/Journey/JourneyResults` | candidate routes incl. National Rail | implemented | alternative-route coverage; leg `directions` vs arrivals `destinationName` matching |
 | TfL `/StopPoint/Search` | place search | implemented | add a proper address geocoder (postcodes, addresses) |
-| National Rail Darwin (LDB / Push Port) | rail live departures & actual times | not yet | registration, licence, and whether "actual" times give better ground truth than countdown inference |
+| National Rail Darwin Push Port v18 (Rail Data Marketplace, Kafka) | **measured** arrival times for the Overground and Elizabeth line (ground truth, `method="darwin"`) | implemented (`darwin.py`, runs in the worker when `DARWIN_*` are set) | live check 6 Nov: 92% of London actuals matched a TfL train by id; actual times are to the minute (stored as a 59 s window) |
 | Bus Open Data Service (SIRI-VM) | bus vehicle positions → better ground truth | not yet | coverage in the pilot corridor; matching to TfL vehicle ids |
 | TfL NUMBAT 2025 (crowding.data.tfl.gov.uk) | scheduled trains per hour for waits without a countdown; typical demand features for the `gbm_numbat` candidate | implemented (`numbat.py`, data file committed) | rebuild yearly when TfL publishes a new edition; see [historical-data.md](historical-data.md) |
 | TfL Journey Planner timetabled departures | waits on services 8+ min apart; walk time when changing trains | implemented (`engine.timetable_wait`, `transfer_min`) | change walks are a heuristic from the planner's connection time |
@@ -14,9 +14,11 @@
 | TfL station crowding (`/crowding`) | station busyness | implemented; **live busyness of every Tube station recorded every 15 min** (`station_crowding`) | only ever shown as an estimate |
 | Live context recorded for future models (`context.py`) | permanent line-status history (one row per change, all modes); hourly London weather (Open-Meteo); station disruptions; lift outages; planned works for the week ahead (daily); road disruptions (raw, archive only) | recording only: no model uses these yet | only build in signals that are also available live (they all are) |
 
-**Ground truth.** Today it is inferred from countdowns: a vehicle that was ≤2 min away and then disappeared
-from the board. That is bounded and quality-scored, but it is not measurement. Darwin actual times and bus
-AVL positions should replace it where available (`ObservedArrival.method` records which).
+**Ground truth.** Tube arrivals are measured by Trackernet; Overground and Elizabeth line arrivals by Darwin's actual
+times (TfL's vehicle id is Darwin's `rid`, and TfL's `910G…` stop ids are Darwin TIPLOCs, so the match is exact).
+Everything else is inferred from countdowns: a vehicle that was ≤2 min away and then disappeared from the board.
+That is bounded and quality-scored, but it is not measurement. Bus AVL positions could replace it for buses
+(`ObservedArrival.method` records which).
 
 **Licensing.** TfL open data is free to use under its transport data terms, but attribution, caching and
 model-training rights still need to be confirmed for commercial use. Raw payloads are kept 14 days

@@ -7,7 +7,7 @@ on:
 
 jobs:
   testflight:
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 45
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -30,12 +30,12 @@ jobs:
 
       - name: Build the app's screens (same code as the web app)
         run: |
-          test -n "$NEXT_PUBLIC_PAXEN_API_URL" || { echo "Set the PAXEN_API_URL repository variable (your Railway API URL)"; exit 1; }
           pnpm build
         env:
           MOBILE_BUILD: "1"
           NEXT_TELEMETRY_DISABLED: "1"
-          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL }}
+          # the live API (not secret: the web app uses the same address); a PAXEN_API_URL repository variable overrides it
+          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
       - run: npx cap sync ios
 
       - name: App Store Connect API key
@@ -43,32 +43,51 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
 
+      - name: Restore the signing certificate (encrypted)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/signing-cache
+          key: paxen-signing-${{ github.run_id }}
+          restore-keys: paxen-signing-
+
+      - name: Signing (distribution certificate + App Store profile)
+        working-directory: .
+        env:
+          SIGNING_CACHE: ${{ runner.temp }}/signing-cache
+          ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          BUNDLE_ID: com.paxdolmes.paxen
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "cryptography>=42"
+          "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py setup
+
       - name: Build and sign
         working-directory: web/ios/App
         run: |
           xcodebuild -project App.xcodeproj -scheme App -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
 
       - name: Upload to TestFlight
         working-directory: web/ios/App
         run: |
-          cat > "$RUNNER_TEMP/export.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
-            <key>teamID</key><string>$TEAM_ID</string>
-            <key>signingStyle</key><string>automatic</string>
-          </dict></plist>
-          PLIST
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Paxen.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Keep the signing certificate for next time (encrypted)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/signing-cache
+          key: paxen-signing-${{ github.run_id }}
+
+      - name: Remove the temporary keychain
+        if: always()
+        working-directory: .
+        run: |
+          test -x "$RUNNER_TEMP/venv/bin/python" && "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py cleanup || true
 
       - name: Remove the key
         if: always()

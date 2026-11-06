@@ -178,6 +178,14 @@ station crowding.
   hire** availability as a fallback when a line is suspended.
 - Paxen's own status snapshots will keep these rates current once the history file ages.
 
+## Update (6 Nov): Darwin, measured Overground and Elizabeth line arrivals
+Rail Data Marketplace approved access to Darwin Push Port (Kafka). The worker now records every actual arrival at the
+153 Overground and Elizabeth line stations Paxen covers and attaches it to TfL's prediction for the same train
+(`paxen/darwin.py`). Live check (GitHub Actions, 4 minutes): 92% of London actual arrivals matched a TfL train and
+station by id. On that small sample TfL's countdown was out by 43 s on average at 0-2 minutes away and 64 s at 2-5
+minutes, and trains came *earlier* than TfL said (bias -21 s and -64 s). Too few to draw conclusions; the evaluation
+reports it as `rail_measured` (model-evaluation.md, Amendment 3).
+
 ## Licensing
 NUMBAT is TfL open data (Open Government Licence based terms). Attribution: *Powered by TfL Open Data*. As with the
 rest of TfL's data, confirm commercial-use terms before launch (see [data-sources.md](data-sources.md)).

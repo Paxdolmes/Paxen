@@ -1,0 +1,19 @@
+# Checks the Darwin integration live: actual arrivals vs TfL's countdowns (no credentials are printed). Run by hand from the
+# Actions tab. It uses its own consumer group, so it never takes Kafka partitions away from the production worker.
+name: Darwin probe
+on:
+  workflow_dispatch:
+concurrency: darwin-probe
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet "confluent-kafka>=2.4" httpx sqlalchemy
+      - run: python .github/scripts/darwin_check.py
+        env:
+          DARWIN_BOOTSTRAP: ${{ secrets.DARWIN_BOOTSTRAP }}
+          DARWIN_USERNAME: ${{ secrets.DARWIN_USERNAME }}
+          DARWIN_PASSWORD: ${{ secrets.DARWIN_PASSWORD }}
+          DARWIN_TOPIC: ${{ secrets.DARWIN_TOPIC }}

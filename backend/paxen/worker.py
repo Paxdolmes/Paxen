@@ -42,6 +42,10 @@ async def main() -> None:
             purged = purge_source(s, "sim")
         if any(purged.values()):
             log.warning("removed simulator data from the live database: %s", purged)
+        from .darwin import start as start_darwin
+
+        if not start_darwin(SessionLocal):
+            log.info("darwin: not configured (DARWIN_* variables): Overground/Elizabeth line truth stays inferred")
     log.info(
         "worker started: recorder, monitor, training | code %s | provider %s | modes %s | region %s",
         (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "local")[:7], settings.provider, ",".join(settings.record_modes),
