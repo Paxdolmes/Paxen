@@ -1,10 +1,10 @@
 # RateMyGuin's public TestFlight link (Friends group, beta review), using this repo's App Store Connect key (it covers
 # every app on the team). RateMyGuin's builds come from its own pipeline (EAS), which GitHub can't see, so this checks
-# every 3 hours and adds any new build to Friends and submits it for review. Nothing changes when there's no new build.
+# once a day (evening) and adds any new build to Friends and submits it for review. Nothing changes when there's no new build.
 name: RateMyGuin friends link
 on:
   schedule:
-    - cron: "17 */3 * * *"
+    - cron: "17 18 * * *"  # 18:17 UTC daily
   workflow_dispatch:
     inputs:
       bundle_id: {description: "RateMyGuin bundle id", required: false, default: "com.ratemyguin.app"}
