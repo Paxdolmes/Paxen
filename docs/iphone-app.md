@@ -1,12 +1,18 @@
 # The Paxen iPhone app
 
-The iPhone app is the same app as the web version (designed in v0): the web app's static build (`MOBILE_BUILD=1`)
-inside a native shell (Capacitor, `web/ios`). Alerts arrive as native notifications through Apple's push service
-(`backend/paxen/apns.py`). A GitHub Actions workflow builds it on a cloud Mac and uploads it to TestFlight
-(`.github/workflows/ios-testflight.yml`), so no Mac is needed.
+The iPhone app is a native React Native app built with Expo (`mobile/`), with the same screens, wording and design
+tokens as the web app (designed in v0). It talks to the same API. Its data contract and wording are shared with the
+web app: `mobile/src/shared/` is copied from `web/lib/` (`npm run sync-shared`; CI fails if they drift). Alerts arrive
+as native notifications through Apple's push service (`backend/paxen/apns.py`), and the live trip shows Apple Maps.
+A GitHub Actions workflow generates the Xcode project (`expo prebuild`), builds it on a cloud Mac and uploads it to
+TestFlight (`.github/workflows/ios-testflight.yml`), so no Mac is needed.
 
-Bundle id: `com.paxdolmes.paxen` (change `appId` in `web/capacitor.config.ts`, `PRODUCT_BUNDLE_IDENTIFIER` in the
-Xcode project and `APNS_TOPIC` together if you need a different one).
+Bundle id: `com.paxdolmes.paxen` (change it in `mobile/app.config.ts`, the workflow's `BUNDLE_ID` and `APNS_TOPIC`
+together if you need a different one). Until build 6 the app was the web app in a Capacitor shell (`web/ios`); that
+shell is no longer built.
+
+Run it locally: `cd mobile && npm install && npx expo start` (Expo Go or a simulator), or `npm run web` for a browser
+preview. `EXPO_PUBLIC_PAXEN_API_URL` points it at another API (default: production).
 
 ## One-off setup
 1. **Apple Developer Program** (about £79 / $99 a year): https://developer.apple.com/programs/enroll/
@@ -26,15 +32,17 @@ Xcode project and `APNS_TOPIC` together if you need a different one).
    `.p8` text), and optionally `APNS_TOPIC` if the bundle id differs. Redeploy.
 
 ## Each build
-GitHub > **Actions** > **iPhone app to TestFlight** > **Run workflow** (about 15 minutes). The build number goes up
+GitHub > **Actions** > **iPhone app to TestFlight** > **Run workflow** (about 20-30 minutes on a cloud Mac, roughly
+£1 of Actions minutes, so it isn't run on every merge). The build number goes up
 automatically. When it's processed (another 5-30 minutes), add yourself in App Store Connect > the app >
 **TestFlight > Internal Testing**, and install it with the **TestFlight** app on your iPhone.
 
 ## Notes
 - Internal TestFlight testers (up to 100 people on your team) need no Apple review; external testers need a short
   beta review.
-- If `PAXEN_CORS_ORIGINS` is set, the API still allows the app's origin (`capacitor://localhost`) automatically.
-- Location is asked for only on a live trip (message in `web/ios/App/App/Info.plist`).
+- Native apps don't send a browser origin, so `PAXEN_CORS_ORIGINS` doesn't affect the iPhone app.
+- Location is asked for only on a live trip (message in `mobile/app.config.ts`), and is never stored.
+- Never edit `mobile/ios`: it's generated on each build from `mobile/app.config.ts`.
 
 ## Sharing with friends (public TestFlight link)
 The "TestFlight testers" workflow runs after every build. It keeps the team in the internal "Paxen team" group, and
