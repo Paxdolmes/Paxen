@@ -299,14 +299,24 @@ _ADDED_INDEXES = [("ix_obs_arrived", "observed_arrivals", "arrived_at")]
 
 
 def init_db(eng=None) -> None:
+    """Create missing tables, columns and indexes. Each schema change runs only when it is actually needed, in its
+    own short transaction: the API and the worker both call this at startup while the other is writing, and an
+    unconditional ALTER (even a no-op one) takes an exclusive table lock that deadlocks with live inserts."""
     eng = eng or engine
     Base.metadata.create_all(eng)
     insp = inspect(eng)
-    with eng.begin() as conn:
-        for table, column, ddl in _ADDED_COLUMNS:
-            if column not in {c["name"] for c in insp.get_columns(table)}:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-        for name, table, column in _ADDED_INDEXES:
-            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"))
-        if eng.dialect.name == "postgresql":  # see Prediction.raw_id
-            conn.execute(text("ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_raw_id_fkey"))
+    pg = eng.dialect.name == "postgresql"
+    todo: list[str] = []
+    for table, column, ddl in _ADDED_COLUMNS:
+        if column not in {c["name"] for c in insp.get_columns(table)}:
+            todo.append(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    for name, table, column in _ADDED_INDEXES:
+        if name not in {i["name"] for i in insp.get_indexes(table)}:
+            todo.append(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})")
+    if pg and "predictions_raw_id_fkey" in {fk.get("name") for fk in insp.get_foreign_keys("predictions")}:
+        todo.append("ALTER TABLE predictions DROP CONSTRAINT IF EXISTS predictions_raw_id_fkey")  # see Prediction.raw_id
+    for stmt in todo:
+        with eng.begin() as conn:
+            if pg:
+                conn.execute(text("SET LOCAL lock_timeout = '10s'"))  # wait briefly for writers, never deadlock them
+            conn.execute(text(stmt))
