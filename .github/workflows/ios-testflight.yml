@@ -1,42 +1,40 @@
-# Builds the Paxen iPhone app (web/ios, Capacitor) on a cloud Mac and uploads it to TestFlight.
-# Run it from GitHub: Actions > "iPhone app to TestFlight" > Run workflow. Setup: docs/iphone-app.md.
+# Builds the Paxen iPhone app (mobile/, React Native with Expo) on a cloud Mac and uploads it to TestFlight.
+# Run by hand (Actions > "iPhone app to TestFlight" > Run workflow): a Mac build costs about £1 of Actions minutes.
+# Signing is done through the App Store Connect API (.github/scripts/ios_signing.py). Setup: docs/iphone-app.md.
 name: iPhone app to TestFlight
 
 on:
   workflow_dispatch:
 
+concurrency: testflight
+
 jobs:
   testflight:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # the live API (not secret: the web app uses the same address); a PAXEN_API_URL repository variable overrides it
+      EXPO_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
+      IOS_BUILD_NUMBER: ${{ github.run_number }}
+      EXPO_NO_TELEMETRY: "1"
     defaults:
       run:
-        working-directory: web
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: web/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run check-shared && npm run typecheck && npx eslint . && npm test
 
-      - name: Build the app's screens (same code as the web app)
-        run: |
-          pnpm build
-        env:
-          MOBILE_BUILD: "1"
-          NEXT_TELEMETRY_DISABLED: "1"
-          # the live API (not secret: the web app uses the same address); a PAXEN_API_URL repository variable overrides it
-          NEXT_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
-      - run: npx cap sync ios
+      - name: Generate the iOS project (expo prebuild, CocoaPods)
+        run: npx expo prebuild --platform ios --clean --no-install && cd ios && pod install
 
       - name: App Store Connect API key
         run: |
@@ -56,20 +54,21 @@ jobs:
           SIGNING_CACHE: ${{ runner.temp }}/signing-cache
           ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           BUNDLE_ID: com.paxdolmes.paxen
+          PBXPROJ: mobile/ios/Paxen.xcodeproj/project.pbxproj
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet "cryptography>=42"
           "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py setup
 
       - name: Build and sign
-        working-directory: web/ios/App
+        working-directory: mobile/ios
         run: |
-          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+          set -o pipefail
+          xcodebuild -workspace Paxen.xcworkspace -scheme Paxen -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive | tail -n 200
 
       - name: Upload to TestFlight
-        working-directory: web/ios/App
+        working-directory: mobile/ios
         run: |
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Paxen.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" \

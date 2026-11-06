@@ -38,7 +38,7 @@ TEMP = Path(os.environ.get("RUNNER_TEMP", "/tmp"))
 STATE = TEMP / "signing-state.json"
 CACHE = Path(os.environ.get("SIGNING_CACHE", str(TEMP / "signing-cache")))
 PROFILE_NAME = "Paxen App Store CI"
-PBXPROJ = Path("web/ios/App/App.xcodeproj/project.pbxproj")
+PBXPROJ = Path(os.environ.get("PBXPROJ") or "mobile/ios/Paxen.xcodeproj/project.pbxproj")
 
 
 def _b64(b: bytes) -> str:
@@ -80,11 +80,13 @@ def make_p12(cert_der: bytes, key: rsa.RSAPrivateKey, password: bytes) -> bytes:
 
 def patch_project(text: str, team: str, profile: str, bundle: str) -> str:
     """Manual distribution signing for the app target's Release configuration only (Swift packages untouched)."""
-    pattern = re.compile(r"(\{\s*isa = XCBuildConfiguration;\s*buildSettings = \{)(.*?)(\};\s*name = Release;)", re.S)
+    # (?:(?!isa = ...).)*? keeps each match inside one build configuration (never runs on from Debug into Release)
+    pattern = re.compile(r"(\{\s*isa = XCBuildConfiguration;\s*buildSettings = \{)((?:(?!isa = XCBuildConfiguration).)*?)"
+                         r"(\};\s*name = Release;)", re.S)
 
     def fix(m: re.Match) -> str:
         settings = m.group(2)
-        if f"PRODUCT_BUNDLE_IDENTIFIER = {bundle};" not in settings:
+        if not re.search(rf'PRODUCT_BUNDLE_IDENTIFIER = "?{re.escape(bundle)}"?;', settings):
             return m.group(0)
         settings = re.sub(r"\n\s*(CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|"
                           r"DEVELOPMENT_TEAM|\"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]\") = [^;]*;", "", settings)

@@ -7,6 +7,7 @@ commute isn't normal today, and recommends a better route before you leave, with
 ```
 backend/   Python (FastAPI) — data recorder, prediction engine, alert rules, REST API
 web/       Next.js mobile-first PWA (UI generated with v0, wired to the API)
+mobile/    The iPhone app: React Native (Expo), same screens and API as the web app
 docs/      API contract, product decisions, data sources
 ```
 
