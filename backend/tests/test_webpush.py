@@ -54,3 +54,9 @@ def test_alerts_go_by_web_push_and_revoked_subscriptions_are_forgotten(session, 
     monkeypatch.setattr(wp, "send", lambda *a, **k: "gone")
     assert deliver(u, alert) == "push_gone" and u.web_push is None
     assert deliver(u, alert) == "inbox"  # nothing left to push to
+
+
+def test_privacy_policy_is_public(client):
+    r = client.get("/privacy")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "never stored" in r.text and "Delete account" in r.text
