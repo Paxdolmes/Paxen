@@ -8,7 +8,7 @@ import ios_signing  # noqa: E402
 
 BLOCK = """\t\t{id} /* {name} */ = {{
 \t\t\tisa = XCBuildConfiguration;
-\t\t\tbuildSettings = {{
+{base}\t\t\tbuildSettings = {{
 \t\t\t\tCODE_SIGN_ENTITLEMENTS = Paxen/Paxen.entitlements;
 {bundle}\t\t\t}};
 \t\t\tname = {name};
@@ -25,8 +25,10 @@ def configs(text: str) -> dict[tuple[str, bool], bool]:
 
 def test_only_the_app_release_configuration_is_signed():
     app = '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "com.paxdolmes.paxen";\n'
-    text = "".join([BLOCK.format(id="A1", name="Debug", bundle=app), BLOCK.format(id="A2", name="Release", bundle=app),
-                    BLOCK.format(id="P1", name="Debug", bundle=""), BLOCK.format(id="P2", name="Release", bundle="")])
+    # after `pod install`, the app's configurations reference the Pods xcconfig before their buildSettings
+    pods = "\t\t\tbaseConfigurationReference = 1A2B /* Pods-Paxen.release.xcconfig */;\n"
+    text = "".join([BLOCK.format(id="A1", name="Debug", bundle=app, base=pods), BLOCK.format(id="A2", name="Release", bundle=app, base=pods),
+                    BLOCK.format(id="P1", name="Debug", bundle="", base=""), BLOCK.format(id="P2", name="Release", bundle="", base="")])
     out = ios_signing.patch_project(text, "TEAM123", "Paxen App Store CI", "com.paxdolmes.paxen")
     assert configs(out) == {("Debug", True): False, ("Release", True): True, ("Debug", False): False,
                             ("Release", False): False}
