@@ -16,22 +16,27 @@ sys.path.insert(0, str(Path(__file__).parent))
 from testflight_testers import BUNDLE, call, err  # noqa: E402
 
 GROUP = "Friends"
-PRIVACY_URL = "https://paxen-production.up.railway.app/privacy"
-DESCRIPTION = (
+PRIVACY_URL = os.environ.get("PRIVACY_URL") or "https://paxen-production.up.railway.app/privacy"
+DESCRIPTION = os.environ.get("APP_DESCRIPTION") or (
     "Paxen is a commute assistant for London. Save your Home and Work, and it learns your normal journey, watches "
     "the Tube, buses, Overground, Elizabeth line and National Rail, and tells you before you leave when today isn't "
     "normal, with a better route and an honest confidence level.")
-WHAT_TO_TEST = (
+WHAT_TO_TEST = os.environ.get("WHAT_TO_TEST") or (
     "Set up Home and Work, then check Today before a journey. Try planning a trip, starting a live trip, and the "
     "alerts (You > Alerts > send a test notification). Tell us when a prediction or alert was wrong.")
-REVIEW_NOTES = (
+REVIEW_NOTES = os.environ.get("REVIEW_NOTES") or (
     "No login: the app creates an anonymous account on first launch. To try it, search a London place for Home "
     "(e.g. 'Orford Road') and Work (e.g. 'Regent Street'). Live data comes from Transport for London.")
 
 
 def main() -> None:
     code, d = call("GET", f"/apps?filter[bundleId]={BUNDLE}&limit=5")
-    app = next(a for a in d["data"] if a["attributes"]["bundleId"] == BUNDLE)
+    app = next((a for a in d.get("data", []) if a["attributes"]["bundleId"] == BUNDLE), None)
+    if not app:
+        code, d = call("GET", "/apps?limit=50")
+        sys.exit(f"No app with bundle id {BUNDLE}. Apps on this team: "
+                 + ", ".join(f"{a['attributes']['name']} ({a['attributes']['bundleId']})" for a in d.get("data", [])))
+    print(f"App: {app['attributes']['name']} ({BUNDLE})")
     aid, locale = app["id"], app["attributes"].get("primaryLocale") or "en-GB"
     email = os.environ.get("CONTACT_EMAIL")
 
