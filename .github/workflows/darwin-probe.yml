@@ -1,0 +1,22 @@
+# Connects to Darwin for two minutes and logs what arrives (no credentials are printed). Runs when this file or the
+# probe script changes on the working branch, or by hand from the Actions tab.
+name: Darwin probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/dazzling-fermat-yx9bg4]
+    paths: [.github/workflows/darwin-probe.yml, .github/scripts/darwin_probe.py]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet "confluent-kafka>=2.4"
+      - run: python .github/scripts/darwin_probe.py
+        env:
+          DARWIN_BOOTSTRAP: ${{ secrets.DARWIN_BOOTSTRAP }}
+          DARWIN_USERNAME: ${{ secrets.DARWIN_USERNAME }}
+          DARWIN_PASSWORD: ${{ secrets.DARWIN_PASSWORD }}
+          DARWIN_TOPIC: ${{ secrets.DARWIN_TOPIC }}
+          DARWIN_GROUP: ${{ secrets.DARWIN_GROUP }}
