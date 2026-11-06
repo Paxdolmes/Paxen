@@ -43,33 +43,38 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
 
+      - name: Signing (temporary distribution certificate + App Store profile)
+        working-directory: .
+        env:
+          ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          BUNDLE_ID: com.paxdolmes.paxen
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "cryptography>=42"
+          "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py setup
+
       - name: Build and sign
         working-directory: web/ios/App
         run: |
           xcodebuild -project App.xcodeproj -scheme App -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Distribution" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
 
       - name: Upload to TestFlight
         working-directory: web/ios/App
         run: |
-          cat > "$RUNNER_TEMP/export.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
-            <key>teamID</key><string>$TEAM_ID</string>
-            <key>signingStyle</key><string>automatic</string>
-          </dict></plist>
-          PLIST
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Paxen.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Revoke the temporary certificate
+        if: always()
+        working-directory: .
+        env:
+          ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+        run: |
+          test -x "$RUNNER_TEMP/venv/bin/python" && "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py cleanup || true
 
       - name: Remove the key
         if: always()
