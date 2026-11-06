@@ -1,0 +1,46 @@
+# RateMyGuin's public TestFlight link (Friends group, beta review), using this repo's App Store Connect key (it covers
+# every app on the team). RateMyGuin's builds come from its own pipeline; run this by hand after a new build to add it.
+name: RateMyGuin friends link
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id: {description: "RateMyGuin bundle id", required: false, default: "com.ratemyguin.app"}
+      contact_first: {description: "Beta review contact first name (first setup only)", required: false}
+      contact_last: {description: "Beta review contact last name", required: false}
+      contact_phone: {description: "Beta review contact phone", required: false}
+      contact_email: {description: "Beta review contact and feedback email", required: false}
+jobs:
+  friends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      BUNDLE_ID: ${{ inputs.bundle_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet cryptography
+      - run: |
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/AuthKey.p8"
+      - run: python .github/scripts/testflight_external.py
+        env:
+          CONTACT_FIRST: ${{ inputs.contact_first }}
+          CONTACT_LAST: ${{ inputs.contact_last }}
+          CONTACT_PHONE: ${{ inputs.contact_phone }}
+          CONTACT_EMAIL: ${{ inputs.contact_email }}
+          PRIVACY_URL: https://github.com/Paxdolmes/ratemyguin/blob/main/PRIVACY.md
+          APP_DESCRIPTION: >-
+            RateMyGuin is the independent, community-powered way to find the best pint of Guinness. Rate pints on pour,
+            head, taste and temperature, see every pub's Excellence Index, collect badges in your Guin Passport and climb
+            the rankings. Independent: not affiliated with Guinness or Diageo.
+          WHAT_TO_TEST: >-
+            Sign in with your email, find a pub near you, and rate a pint while you're there (ratings made in the pub
+            count as verified). Check the pub pages, rankings and your Passport, and tell us anything confusing or wrong.
+          REVIEW_NOTES: >-
+            Sign-in is by a one-time code sent to any email address you enter: no password or demo account is needed.
+            Rating checks the phone is at the pub (verified visit); away from a pub you can still browse pubs, scores and
+            rankings, and a rating is saved as unverified. Independent app, not affiliated with Guinness or Diageo.
+            For people of legal drinking age.
+      - if: always()
+        run: rm -f "$ASC_KEY_PATH"
