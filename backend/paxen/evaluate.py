@@ -193,6 +193,11 @@ def run(s: Session, source: str, promote: bool = True) -> dict:
     samples = measured if measured else load_daily(s, source, None)
     report = evaluate(samples)
     report["ground_truth"] = "measured (Trackernet)" if measured else "inferred from countdowns"
+    # Amendment 3: Overground and Elizabeth line, measured by Darwin, reported alongside (never decides promotion)
+    rail = load_daily(s, source, ("darwin",))
+    if rail:
+        r = evaluate(rail)
+        report["rail_measured"] = {k: r.get(k) for k in ("status", "days", "samples", "summary", "message")}
     if promote:
         kind = model_kind(source)
         s.query(ModelVersion).filter(ModelVersion.kind == kind, ModelVersion.active.is_(True)).update(
