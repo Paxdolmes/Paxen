@@ -1,7 +1,10 @@
 # RateMyGuin's public TestFlight link (Friends group, beta review), using this repo's App Store Connect key (it covers
-# every app on the team). RateMyGuin's builds come from its own pipeline; run this by hand after a new build to add it.
+# every app on the team). RateMyGuin's builds come from its own pipeline (EAS), which GitHub can't see, so this checks
+# every 3 hours and adds any new build to Friends and submits it for review. Nothing changes when there's no new build.
 name: RateMyGuin friends link
 on:
+  schedule:
+    - cron: "17 */3 * * *"
   workflow_dispatch:
     inputs:
       bundle_id: {description: "RateMyGuin bundle id", required: false, default: "com.ratemyguin.app"}
@@ -16,7 +19,7 @@ jobs:
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      BUNDLE_ID: ${{ inputs.bundle_id }}
+      BUNDLE_ID: ${{ inputs.bundle_id || 'com.ratemyguin.app' }}
     steps:
       - uses: actions/checkout@v4
       - run: pip install --quiet cryptography
