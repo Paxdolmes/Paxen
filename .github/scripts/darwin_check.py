@@ -29,11 +29,16 @@ def poll_tfl():
             r = httpx.get("https://api.tfl.gov.uk/Mode/overground,elizabeth-line/Arrivals", params={"count": "-1"},
                           headers={"User-Agent": "paxen-check"}, timeout=60)
             now = datetime.now(timezone.utc)
-            for a in r.json():
+            data = r.json()
+            if not isinstance(data, list):
+                print("tfl returned", r.status_code, str(data)[:200])
+                time.sleep(30)
+                continue
+            for a in data:
                 exp = datetime.fromisoformat(a["expectedArrival"].replace("Z", "+00:00"))
                 preds.setdefault((a.get("vehicleId"), a.get("naptanId")), []).append((now, exp))
         except Exception as e:
-            print("tfl poll failed:", type(e).__name__)
+            print("tfl poll failed:", type(e).__name__, str(e)[:200])
         time.sleep(30)
 
 
