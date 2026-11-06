@@ -43,9 +43,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
 
-      - name: Signing (temporary distribution certificate + App Store profile)
+      - name: Restore the signing certificate (encrypted)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/signing-cache
+          key: paxen-signing-${{ github.run_id }}
+          restore-keys: paxen-signing-
+
+      - name: Signing (distribution certificate + App Store profile)
         working-directory: .
         env:
+          SIGNING_CACHE: ${{ runner.temp }}/signing-cache
           ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           BUNDLE_ID: com.paxdolmes.paxen
         run: |
@@ -68,11 +76,16 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
-      - name: Revoke the temporary certificate
+      - name: Keep the signing certificate for next time (encrypted)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/signing-cache
+          key: paxen-signing-${{ github.run_id }}
+
+      - name: Remove the temporary keychain
         if: always()
         working-directory: .
-        env:
-          ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
         run: |
           test -x "$RUNNER_TEMP/venv/bin/python" && "$RUNNER_TEMP/venv/bin/python" .github/scripts/ios_signing.py cleanup || true
 
