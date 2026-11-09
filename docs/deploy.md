@@ -141,6 +141,9 @@ Measured on live data (3 Nov 2026):
   (`PAXEN_PREDICTION_RETENTION_DAYS`, default 60): 60 days ~10 GB, 30 days ~6 GB, 14 days ~4 GB. `/v1/health` shows the
   live size (`data.db_mb`). Railway's Hobby plan caps a volume at 5 GB; Pro starts at 50 GB. Postgres reuses the space
   of deleted rows but doesn't hand it back to the disk, so the on-disk size never shrinks by itself.
+- **Railway compute** (Hobby: $5/month covers the first $5 of usage). The database is the biggest user. To keep it
+  small: training runs once a day (`PAXEN_TRAIN_INTERVAL`, seconds, default 86400), storage thinning every 2 hours
+  (`PAXEN_THIN_INTERVAL`, default 7200), and Darwin matches trains from the recorder's memory rather than the database.
 - **R2:** about 7 GB/day (rail ~1 GB, buses ~6 GB), so about $3 a month for each month of history kept.
   Drop buses to every 5 min (`PAXEN_ARCHIVE_ONLY_INTERVAL=300`) to cut that by 60%.
 - **Downloads:** the bus feed is ~95 MB per poll (~69 GB/day at 2 min). Railway doesn't charge for inbound traffic.

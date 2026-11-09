@@ -123,11 +123,15 @@ def train_tick() -> dict:
             res = {"status": rep["status"], "winner": rep.get("winner"), "days": rep["days"],
                    "ground_truth": rep.get("ground_truth"), "message": rep.get("message")}
         prune(s, utcnow())
-        if not isinstance(provider, SimProvider):
-            from .evaluate import thin_history
-
-            res["thinned"] = thin_history(s, provider.name, utcnow())
         return res
+
+
+def thin_tick() -> dict:
+    """Storage: thin old days of predictions to the sample the evaluation reads (evaluate.thin_history)."""
+    from .evaluate import thin_history
+
+    with SessionLocal() as s:
+        return thin_history(s, get_provider().name, utcnow())
 
 
 TRAIN_FIRST_DELAY_S = 600  # let the recorder run for a while after a (re)start before the first training run
@@ -142,20 +146,20 @@ def _peak_mb() -> int | None:
         return None
 
 
-def train_isolated() -> dict:
-    """Run train_tick in a child process. Training holds weeks of history in memory; if it is ever killed for
-    running out of memory, only the child dies and the recorder keeps recording (before this, an out-of-memory
-    kill took the whole worker down every 30 s, silently)."""
+def train_isolated(flag: str = "--train-once") -> dict:
+    """Run train_tick (or, with --thin-once, thin_tick) in a child process. Training holds weeks of history in
+    memory; if it is ever killed for running out of memory, only the child dies and the recorder keeps recording
+    (before this, an out-of-memory kill took the whole worker down every 30 s, silently). The model libraries are
+    only ever loaded in the child, never in the long-running worker."""
+    import os
     import subprocess
     import sys
-
-    import os
 
     # One thread for the model libraries (OpenMP). By default they start one thread per CPU the host has, which
     # in a container is far more than it may use; with the recorder also running, the threads spin waiting for
     # each other and a 3-second model fit took over 10 minutes in testing.
     env = {**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
-    proc = subprocess.run([sys.executable, "-m", "paxen.worker", "--train-once"], env=env)
+    proc = subprocess.run([sys.executable, "-m", "paxen.worker", flag], env=env)
     if proc.returncode == 0:
         return {"exit": 0}
     if proc.returncode in (-9, 137):
@@ -185,6 +189,9 @@ def start(loop_tasks: list) -> None:
                                                     first_delay=60)))
     delay = 0 if settings.provider == "sim" else TRAIN_FIRST_DELAY_S
     loop_tasks.append(asyncio.create_task(_loop(train_isolated, settings.train_interval_s, "train", first_delay=delay)))
+    if settings.provider != "sim" and settings.thin_interval_s > 0:
+        loop_tasks.append(asyncio.create_task(_loop(lambda: train_isolated("--thin-once"), settings.thin_interval_s,
+                                                    "thin", first_delay=300)))
     from .archive import get_archive
 
     try:

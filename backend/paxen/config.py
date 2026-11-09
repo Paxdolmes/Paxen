@@ -38,7 +38,9 @@ class Settings:
     run_workers: bool = field(default_factory=lambda: _bool("PAXEN_RUN_WORKERS", True))
     poll_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_POLL_INTERVAL", "30")))
     monitor_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_MONITOR_INTERVAL", "60")))
-    train_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_TRAIN_INTERVAL", "21600")))
+    # The evaluation works in whole London days, so once a day is enough (it was every 6 h: 4x the database work).
+    train_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_TRAIN_INTERVAL", "86400")))
+    thin_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_THIN_INTERVAL", "7200")))
     # Live context (weather, station disruptions, lifts, planned works, crowding): see paxen/context.py. 0 = off.
     context_interval_s: int = field(default_factory=lambda: int(os.getenv("PAXEN_CONTEXT_INTERVAL", "300")))
     sim_scenario: str = field(default_factory=lambda: os.getenv("PAXEN_SIM_SCENARIO", "auto"))

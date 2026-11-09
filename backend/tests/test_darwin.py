@@ -70,3 +70,21 @@ def test_actuals_attach_to_the_tfl_train_and_are_preferred_as_truth(session):
     assert obs.line_id == "mildmay" and obs.direction == "Stratford"
     [x] = load_samples(session, "tfl")
     assert x.method == "darwin" and x.error_s == 60  # measured beats the countdown inference
+
+
+def test_actuals_match_from_the_recorders_train_index_without_the_database(session):
+    from types import SimpleNamespace
+
+    t0 = datetime(2026, 11, 6, 9, 0, tzinfo=timezone.utc)
+    index = darwin.TrainIndex()
+    poll = [SimpleNamespace(vehicle_id="202611066711177", stop_id="910GDALSKLD", line_id="mildmay", direction="Stratford"),
+            SimpleNamespace(vehicle_id="17", stop_id="940GZZLUOXC", line_id="victoria", direction="Brixton")]  # Tube
+    index.note(poll, t0)
+    index._first = t0 - darwin.WARM_UP  # warmed up: no database fallback for unknown trains
+    assert index.get(["17"]) == {}  # only rail stops are kept
+    a = darwin.Actual("202611066711177", "DALSKLD", datetime(2026, 11, 6, 10, 39, tzinfo=timezone.utc), "TD")
+    other = darwin.Actual("202611069999999", "DALSKLD", datetime(2026, 11, 6, 10, 39, tzinfo=timezone.utc), "TD")
+    assert darwin.store(session, [a, other], index=index) == 1  # no Prediction rows exist at all
+    session.commit()
+    obs = session.query(ObservedArrival).filter_by(method="darwin").one()
+    assert (obs.line_id, obs.direction, obs.stop_id) == ("mildmay", "Stratford", "910GDALSKLD")

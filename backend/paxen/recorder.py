@@ -170,6 +170,10 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
         log.warning("network poll failed for %s: %s", mode,redact(e))
         return {"mode": mode, "seen": 0, "kept": 0}
     key = archive_raw(provider.name, f"mode-{mode}", now, res.raw, archive)
+    if mode in ("overground", "elizabeth-line"):
+        from .darwin import TRAINS
+
+        TRAINS.note(res.items, now)  # lets Darwin match its actual arrivals without querying the database
     raw = RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
                       latency_ms=res.latency_ms, item_count=len(res.items), payload=None, archive_key=key)
     s.add(raw)

@@ -32,7 +32,45 @@ from .timeutil import LONDON, naive_utc
 log = logging.getLogger("paxen.darwin")
 METHOD = "darwin"
 FLUSH_EVERY_S = 15
-LINE_LOOKBACK = timedelta(hours=6)
+LINE_LOOKBACK = timedelta(hours=6)  # how long a train's TfL line and direction are remembered
+DB_LOOKBACK = timedelta(hours=1)  # database fallback, only while the in-memory index is warming up
+WARM_UP = timedelta(hours=1)  # after this long, every TfL train arriving now has been seen by the recorder
+
+
+class TrainIndex:
+    """The TfL line and direction of each Overground/Elizabeth line train (TfL vehicle id = Darwin rid) at each
+    station, noted from the recorder's network polls every 30 s. Matching a Darwin actual then needs no database
+    query: before this, each 15-second flush scanned the last 6 hours of predictions (~450k rows)."""
+
+    def __init__(self, ttl: timedelta = LINE_LOOKBACK):
+        self.ttl = ttl
+        self._lock = threading.Lock()
+        self._trains: dict[str, tuple[datetime, dict[str, tuple[str, str | None]]]] = {}
+        self._first: datetime | None = None
+        self._last_gc: datetime | None = None
+
+    def note(self, items, now: datetime) -> None:
+        with self._lock:
+            self._first = self._first or now
+            for a in items:
+                if not a.stop_id.startswith("910G") or not a.vehicle_id:
+                    continue
+                stops = self._trains.get(a.vehicle_id, (now, {}))[1]
+                stops[a.stop_id] = (a.line_id, a.direction)
+                self._trains[a.vehicle_id] = (now, stops)
+            if self._last_gc is None or now - self._last_gc > timedelta(minutes=10):
+                self._trains = {k: v for k, v in self._trains.items() if now - v[0] < self.ttl}
+                self._last_gc = now
+
+    def get(self, rids) -> dict[str, dict[str, tuple[str, str | None]]]:
+        with self._lock:
+            return {r: dict(self._trains[r][1]) for r in rids if r in self._trains}
+
+    def warm(self, now: datetime) -> bool:
+        return self._first is not None and now - self._first >= WARM_UP
+
+
+TRAINS = TrainIndex()
 
 
 @dataclass(frozen=True)
@@ -106,22 +144,30 @@ def london_tiplocs() -> set[str]:
     return {sid[4:] for k in keys for sid in nb.stations.get(k, {}) if sid.startswith("910G")}
 
 
-def store(s: Session, actuals: list[Actual], source: str = "tfl") -> int:
+def store(s: Session, actuals: list[Actual], source: str = "tfl", index: TrainIndex | None = None) -> int:
     """Attach actual arrivals to the TfL train they belong to (same vehicle id) and save them as measured."""
+    index = index or TRAINS
     from .db import ObservedArrival, Prediction
 
     if not actuals:
         return 0
     rids = sorted({a.rid for a in actuals})
-    since = naive_utc(min(a.arrived_at for a in actuals) - LINE_LOOKBACK)
     trains: dict[tuple[str, str], tuple[str, str | None]] = {}  # (rid, stop) -> (line, direction)
     by_rid: dict[str, tuple[str, str | None]] = {}
-    for vid, stop, line, direction in s.execute(
-            select(Prediction.vehicle_id, Prediction.stop_id, Prediction.line_id, Prediction.direction)
-            .where(Prediction.source == source, Prediction.vehicle_id.in_(rids), Prediction.polled_at >= since)
-            .distinct()):
-        trains[(vid, stop)] = (line, direction)
-        by_rid.setdefault(vid, (line, direction))
+    for rid, stops in index.get(rids).items():
+        for stop, info in stops.items():
+            trains[(rid, stop)] = info
+            by_rid.setdefault(rid, info)
+    missing = [r for r in rids if r not in by_rid]
+    # Trains not in the index belong to other operators, except just after a restart: only then ask the database.
+    if missing and not index.warm(datetime.now(timezone.utc)):
+        since = naive_utc(min(a.arrived_at for a in actuals) - DB_LOOKBACK)
+        for vid, stop, line, direction in s.execute(
+                select(Prediction.vehicle_id, Prediction.stop_id, Prediction.line_id, Prediction.direction)
+                .where(Prediction.source == source, Prediction.vehicle_id.in_(missing), Prediction.polled_at >= since)
+                .distinct()):
+            trains[(vid, stop)] = (line, direction)
+            by_rid.setdefault(vid, (line, direction))
     n = 0
     seen: set[tuple[str, str]] = set()
     for a in actuals:
