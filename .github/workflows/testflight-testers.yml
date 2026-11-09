@@ -29,6 +29,15 @@ jobs:
           echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/AuthKey.p8"
       - run: python .github/scripts/testflight_testers.py
+      # Opening the iPhone build's encrypted signing cache each day stops GitHub deleting it after 7 idle days
+      # (which would make the next build create another Apple certificate). Nothing here decrypts or uses it.
+      - name: Keep the iPhone signing cache alive
+        if: always()
+        uses: actions/cache/restore@v4
+        with:
+          path: .signing-cache
+          key: paxen-signing-v2-keepalive
+          restore-keys: paxen-signing-v2-
       - name: Friends (public link)
         run: python .github/scripts/testflight_external.py
         env:

@@ -41,17 +41,30 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
 
+      # The encrypted certificate is cached at a workspace-relative path, so the daily "TestFlight testers" job (Linux)
+      # can open it too: GitHub deletes caches unused for 7 days, and losing it would mean a new Apple certificate.
       - name: Restore the signing certificate (encrypted)
+        id: signing-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .signing-cache
+          key: paxen-signing-v2-${{ github.run_id }}
+          restore-keys: paxen-signing-v2-
+      - name: Restore it from the cache's old location (until the new one exists)
+        if: steps.signing-cache.outputs.cache-matched-key == ''
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/signing-cache
           key: paxen-signing-${{ github.run_id }}
           restore-keys: paxen-signing-
+      - if: steps.signing-cache.outputs.cache-matched-key == ''
+        working-directory: .
+        run: if [ -f "$RUNNER_TEMP/signing-cache/dist.p12" ]; then cp -R "$RUNNER_TEMP/signing-cache" .signing-cache; fi
 
       - name: Signing (distribution certificate + App Store profile)
         working-directory: .
         env:
-          SIGNING_CACHE: ${{ runner.temp }}/signing-cache
+          SIGNING_CACHE: ${{ github.workspace }}/.signing-cache
           ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           BUNDLE_ID: com.paxdolmes.paxen
           PBXPROJ: mobile/ios/Paxen.xcodeproj/project.pbxproj
@@ -79,8 +92,8 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ${{ runner.temp }}/signing-cache
-          key: paxen-signing-${{ github.run_id }}
+          path: .signing-cache
+          key: paxen-signing-v2-${{ github.run_id }}
 
       - name: Remove the temporary keychain
         if: always()

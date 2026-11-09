@@ -43,6 +43,9 @@ automatically. When it's processed (another 5-30 minutes), add yourself in App S
 - Native apps don't send a browser origin, so `PAXEN_CORS_ORIGINS` doesn't affect the iPhone app.
 - Location is asked for only on a live trip (message in `mobile/app.config.ts`), and is never stored.
 - Never edit `mobile/ios`: it's generated on each build from `mobile/app.config.ts`.
+- Signing reuses one distribution certificate, whose key is kept encrypted in the Actions cache (`.signing-cache`).
+  The daily "TestFlight testers" job opens that cache so GitHub doesn't delete it after 7 idle days; its log also
+  lists the team's distribution certificates (Apple allows only a few).
 
 ## Sharing with friends (public TestFlight link)
 The "TestFlight testers" workflow runs after every build. It keeps the team in the internal "Paxen team" group, and
