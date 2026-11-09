@@ -29,7 +29,7 @@ from .insights import insights as build_insights
 from .notify import deliver
 from .providers import get_provider
 from .providers.sim import SCENARIOS, SimProvider
-from .recorder import feed_health
+from .recorder import data_stats, feed_health
 from .timeutil import aware, local, naive_utc, utcnow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -242,8 +242,14 @@ def privacy():
 @app.get("/v1/health")
 def health(s: Session = Depends(db)):
     p = get_provider()
-    return {"ok": True, "provider": p.name, "simulated": isinstance(p, SimProvider),
-            "scenario": getattr(p, "scenario", None), "feed": feed_health(s, now(), p.name)}
+    out = {"ok": True, "provider": p.name, "simulated": isinstance(p, SimProvider),
+           "scenario": getattr(p, "scenario", None), "feed": feed_health(s, now(), p.name)}
+    try:
+        out["data"] = data_stats(s, now(), p.name)
+    except Exception as e:  # diagnostics only: never fail the health check over them
+        s.rollback()
+        out["data"] = {"error": type(e).__name__}
+    return out
 
 
 # ------------------------------------------------------------------------ account

@@ -123,3 +123,25 @@ def test_impossibly_fast_trip_not_learned_from():
     t = Trip(user_id="u", started_at=MORNING.replace(tzinfo=None), status="active", plan={"forecast": {"p10": 38}})
     finish(t, MORNING + timedelta(minutes=2))
     assert t.status == "too_fast" and t.duration_min is None
+
+
+def test_health_reports_ground_truth_by_method():
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from paxen import recorder
+    from paxen.db import ObservedArrival, SessionLocal, init_db
+    from paxen.main import app
+    from paxen.timeutil import naive_utc, utcnow
+
+    init_db()
+    recorder._DATA_STATS.clear()
+    with SessionLocal() as s:
+        t = naive_utc(utcnow() - timedelta(hours=1))
+        for method in ("darwin", "darwin", "trackernet"):
+            s.add(ObservedArrival(source="sim", stop_id="S", line_id="L", vehicle_id="V", arrived_at=t, earliest=t,
+                                  latest=t, method=method, quality=1.0))
+        s.commit()
+    data = TestClient(app).get("/v1/health").json()["data"]
+    assert data["arrivals_24h"].get("darwin", 0) >= 2 and data["arrivals_24h"].get("trackernet", 0) >= 1
