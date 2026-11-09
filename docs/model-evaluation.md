@@ -160,8 +160,8 @@ them would change the headline metric after the protocol was registered.
 
 The recorder stores about 1.8 million predictions a day, but `load_daily` only ever reads every stride-th one (by
 prediction id) of a busy day, where stride = day's predictions // (MAX_PER_DAY x PRESAMPLE). From 9 November,
-`thin_history` deletes the other predictions of each London day once it is 3 days old (recent days stay complete for
-arrival inference and the Trackernet/Darwin matching). Afterwards that day's stride is 1 and `load_daily` reads exactly
+`thin_history` deletes the other predictions of each London day once the next day has ended (yesterday and today stay
+complete for arrival inference, which reads 20 minutes back, and Darwin matching, 6 hours). Afterwards that day's stride is 1 and `load_daily` reads exactly
 the same predictions, so every report and promotion decision is unchanged; tests check this on SQLite and Postgres.
 Arrivals are not thinned, and the raw archive keeps every original response.
 

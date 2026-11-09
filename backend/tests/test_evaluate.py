@@ -214,7 +214,7 @@ def test_thinning_keeps_exactly_what_the_evaluation_reads(session, monkeypatch):
     total = session.scalar(select(func.count()).select_from(Prediction))
 
     now = start + timedelta(days=5, hours=12)  # 7 Nov: 4-6 Nov (and today) stay complete, 2-3 Nov are thinned
-    res = ev.thin_history(session, "tfl", now, max_days=10, pause_s=0)
+    res = ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=10, pause_s=0)
     assert len(res["days"]) == 2 and res["deleted"] > 0
     assert session.scalar(select(func.count()).select_from(Prediction)) == total - res["deleted"]
     after = ev.load_daily(session, "tfl", ("darwin",))
@@ -224,7 +224,7 @@ def test_thinning_keeps_exactly_what_the_evaluation_reads(session, monkeypatch):
     recent = session.scalar(select(func.count()).select_from(Prediction).where(
         Prediction.polled_at >= (start + timedelta(days=2)).replace(tzinfo=None)))
     assert recent == 4 * 43
-    assert ev.thin_history(session, "tfl", now, max_days=10, pause_s=0)["deleted"] == 0
+    assert ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=10, pause_s=0)["deleted"] == 0
 
 
 def test_thinning_goes_a_few_days_per_run(session, monkeypatch):
@@ -235,6 +235,6 @@ def test_thinning_goes_a_few_days_per_run(session, monkeypatch):
     start = datetime(2026, 11, 2, tzinfo=timezone.utc)
     _record_days(session, days=6, per_day=43, start=start)
     now = start + timedelta(days=5, hours=12)
-    assert len(ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"]) == 1
-    assert len(ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"]) == 1  # the next old day
-    assert ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"] == []
+    assert len(ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"]) == 1
+    assert len(ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"]) == 1  # the next old day
+    assert ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"] == []

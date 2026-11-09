@@ -156,8 +156,8 @@ MAX_PER_DAY = 25_000  # memory guard: a fixed random sample of each day's traini
 PRESAMPLE = 4  # the database pre-sample keeps ~this many times MAX_PER_DAY predictions (not all have a match)
 
 # Storage (thin_history): a complete London day this many days old is reduced to the predictions load_daily reads.
-KEEP_FULL_DAYS = 3  # recent days stay complete: arrival inference and the Trackernet/Darwin matching use them
-THIN_DAYS_PER_RUN = 2  # days thinned per training run, so the deletes are spread over several runs
+KEEP_FULL_DAYS = 1  # yesterday (and today) stay complete: arrival inference reads 20 min back, Darwin matching 6 h
+THIN_DAYS_PER_RUN = 3  # days thinned per training run, so the deletes are spread over several runs
 THIN_SLICE = timedelta(minutes=10)  # each delete covers 10 minutes of polls (~12k rows) in its own transaction
 THIN_PAUSE_S = 5.0  # between slices: keeps the database's write-ahead log (on the same disk) small
 
