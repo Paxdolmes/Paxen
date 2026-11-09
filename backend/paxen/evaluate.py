@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import ModelVersion, Prediction
+from .db import DaySample, ModelVersion, Prediction
 from .forecast import Sample, lead_bucket, load_samples, model_kind
 from .models import CANDIDATES, SIMPLICITY, Conformal
 from .timeutil import LONDON, aware, naive_utc
@@ -182,6 +182,32 @@ def _day_count(s: Session, source: str, start: datetime, end: datetime) -> int:
         Prediction.source == source, Prediction.polled_at >= naive_utc(start), Prediction.polled_at < naive_utc(end))) or 0
 
 
+def _thinned_stride(s: Session, source: str, start: datetime, end: datetime) -> int | None:
+    """For a day thinned before strides were recorded: thinning goes from the start of the day and keeps only ids
+    divisible by the stride, so the gcd of the first busy hour's ids recovers it. None if that hour is untouched."""
+    import math
+
+    a, stop = naive_utc(start), naive_utc(end)
+    while a < stop:
+        b = min(a + timedelta(hours=1), stop)
+        ids = s.scalars(select(Prediction.id).where(
+            Prediction.source == source, Prediction.polled_at >= a, Prediction.polled_at < b)).all()
+        if len(ids) >= 50:  # an untouched hour's ids are near-consecutive, so their gcd is 1
+            g = math.gcd(*ids)
+            return g if g > 1 else None
+        a = b
+    return None
+
+
+def day_stride(s: Session, source: str, start: datetime, end: datetime) -> int:
+    """The 1-in-k sample of this London day that load_daily reads: recorded when the day was thinned, recovered
+    from the ids if thinning began before strides were recorded, otherwise from the day's count."""
+    rec = s.get(DaySample, (source, str(start.date())))
+    if rec:
+        return rec.stride
+    return _thinned_stride(s, source, start, end) or presample_stride(_day_count(s, source, start, end))
+
+
 def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: int = 0) -> list[Sample]:
     """Load history one London day at a time, keeping at most MAX_PER_DAY pairs per day (same seed, same sample).
 
@@ -195,8 +221,7 @@ def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: i
         return []
     out: list[Sample] = []
     for day, nxt in day_windows(lo, hi):
-        stride = presample_stride(_day_count(s, source, day, nxt))
-        batch = load_samples(s, source, since=day, until=nxt, methods=methods, stride=stride)
+        batch = load_samples(s, source, since=day, until=nxt, methods=methods, stride=day_stride(s, source, day, nxt))
         if len(batch) > MAX_PER_DAY:
             batch = random.Random(f"{seed}-{day.date()}").sample(batch, MAX_PER_DAY)
         out += batch
@@ -207,10 +232,10 @@ def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: i
 def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = KEEP_FULL_DAYS,
                  max_days: int = THIN_DAYS_PER_RUN, pause_s: float = THIN_PAUSE_S) -> dict:
     """Storage. The recorder keeps ~1.8 million predictions a day, but load_daily only ever reads every stride-th one
-    (by id) of a busy day. Once a day is `keep_full_days` old, delete the rest. Afterwards that day's stride is 1 and
-    load_daily reads exactly the same predictions, so no evaluation or training result changes (tests check this);
-    the raw archive still holds every original response. Deletes go 10 minutes of polls at a time, with pauses,
-    at most `max_days` days per run."""
+    (by id) of a busy day. Once a day is old enough, delete the rest. The day's stride is recorded first, so
+    load_daily goes on reading exactly the same predictions (no evaluation or training result changes; tests check
+    this, including after an interrupted run), and the raw archive still holds every original response. Deletes go
+    10 minutes of polls at a time, with pauses, at most `max_days` days per run."""
     import time
 
     lo = s.scalar(select(func.min(Prediction.polled_at)).where(Prediction.source == source))
@@ -222,20 +247,29 @@ def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = K
     for day, nxt in day_windows(lo, cutoff):
         if nxt > cutoff or len(out["days"]) >= max_days:
             break
-        k = presample_stride(_day_count(s, source, day, nxt))
-        if k == 1:
-            continue  # small or already thinned
-        a, end = naive_utc(day), naive_utc(nxt)
-        while a < end:
-            b = min(a + THIN_SLICE, end)
-            out["deleted"] += s.query(Prediction).filter(
-                Prediction.source == source, Prediction.polled_at >= a, Prediction.polled_at < b,
-                Prediction.id % k != 0).delete(synchronize_session=False)
-            s.commit()
-            a = b
-            if pause_s:
-                time.sleep(pause_s)
-        out["days"].append(f"{day.date()} (kept 1 in {k})")
+        key = str(day.date())
+        rec = s.get(DaySample, (source, key))
+        if rec and rec.thinned:
+            continue
+        if not rec:
+            rec = DaySample(source=source, day=key, stride=day_stride(s, source, day, nxt), thinned=False)
+            s.add(rec)
+            s.commit()  # recorded before anything is deleted
+        k = rec.stride
+        if k > 1:
+            a, end = naive_utc(day), naive_utc(nxt)
+            while a < end:
+                b = min(a + THIN_SLICE, end)
+                out["deleted"] += s.query(Prediction).filter(
+                    Prediction.source == source, Prediction.polled_at >= a, Prediction.polled_at < b,
+                    Prediction.id % k != 0).delete(synchronize_session=False)
+                s.commit()
+                a = b
+                if pause_s:
+                    time.sleep(pause_s)
+            out["days"].append(f"{key} (kept 1 in {k})")
+        rec.thinned = True
+        s.commit()
     return out
 
 

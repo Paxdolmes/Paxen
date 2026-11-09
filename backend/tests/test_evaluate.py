@@ -238,3 +238,79 @@ def test_thinning_goes_a_few_days_per_run(session, monkeypatch):
     assert len(ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"]) == 1
     assert len(ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"]) == 1  # the next old day
     assert ev.thin_history(session, "tfl", now, keep_full_days=3, max_days=1, pause_s=0)["days"] == []
+
+
+def _record_busy_day(session, day_start: datetime, first_hour: int, rest: int):
+    """A day with `first_hour` predictions in its first hour and `rest` spread over the remainder, all matched."""
+    from paxen.db import ObservedArrival, Prediction
+
+    times = [day_start + timedelta(seconds=3 + i * 3600 // first_hour) for i in range(first_hour)]
+    times += [day_start + timedelta(hours=1, seconds=i * 82800 // rest) for i in range(rest)]
+    for i, polled in enumerate(times):
+        exp = polled + timedelta(seconds=300)
+        veh = f"b{day_start:%d}-{i}"
+        session.add(Prediction(source="tfl", polled_at=polled.replace(tzinfo=None), stop_id="910GX", line_id="weaver",
+                               mode="overground", direction="outbound", vehicle_id=veh,
+                               expected_arrival=exp.replace(tzinfo=None), tts_s=300))
+        arr = (exp + timedelta(seconds=(i % 9) * 15 - 60)).replace(tzinfo=None)
+        session.add(ObservedArrival(source="tfl", stop_id="910GX", line_id="weaver", vehicle_id=veh,
+                                    direction="outbound", arrived_at=arr, earliest=arr, latest=arr, method="darwin",
+                                    quality=1.0))
+    session.commit()
+
+
+def test_an_interrupted_thinning_run_resumes_with_the_same_sample(session, monkeypatch):
+    import time as _time
+
+    from paxen import evaluate as ev
+
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 5)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_days(session, days=4, per_day=43, start=start)
+    before = ev.load_daily(session, "tfl", ("darwin",))
+    now = start + timedelta(days=3, hours=12)
+
+    class Stop(Exception):
+        pass
+
+    def stop(_s):
+        raise Stop
+
+    monkeypatch.setattr(_time, "sleep", stop)  # the run dies after its first 10-minute slice
+    try:
+        ev.thin_history(session, "tfl", now, keep_full_days=1, pause_s=1)
+    except Stop:
+        pass
+    monkeypatch.undo()
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 5)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)
+    assert _key(ev.load_daily(session, "tfl", ("darwin",))) == _key(before)  # mid-way: still the same sample
+    ev.thin_history(session, "tfl", now, keep_full_days=1, pause_s=0)
+    assert _key(ev.load_daily(session, "tfl", ("darwin",))) == _key(before)
+
+
+def test_a_day_thinned_before_strides_were_recorded_is_recovered(session, monkeypatch):
+    from sqlalchemy import func, select
+
+    from paxen import evaluate as ev
+    from paxen.db import Prediction
+
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 100)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)  # stride = n // 200
+    day = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_busy_day(session, day, first_hour=1000, rest=400)
+    _record_busy_day(session, day + timedelta(days=1), first_hour=1000, rest=400)
+    before = ev.load_daily(session, "tfl", ("darwin",))
+    k = 1400 // 200
+    # the previous version thinned the first hour of 2 Nov, then stopped (no stride recorded)
+    first_hour_end = (day + timedelta(hours=1)).replace(tzinfo=None)
+    session.query(Prediction).filter(Prediction.polled_at < first_hour_end, Prediction.id % k != 0).delete(
+        synchronize_session=False)
+    session.commit()
+    assert _key(ev.load_daily(session, "tfl", ("darwin",))) == _key(before)
+    ev.thin_history(session, "tfl", day + timedelta(days=2, hours=12), keep_full_days=0, pause_s=0)
+    assert _key(ev.load_daily(session, "tfl", ("darwin",))) == _key(before)
+    left = session.scalar(select(func.count()).select_from(Prediction).where(
+        Prediction.polled_at < (day + timedelta(days=1)).replace(tzinfo=None)))
+    assert left <= 1400 // k + 1

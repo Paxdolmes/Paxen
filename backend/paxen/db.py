@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -157,10 +158,9 @@ class Prediction(Base):
     # at this stop/platform (1 = next), and seconds behind the train ahead of it.
     queue_rank: Mapped[int | None] = mapped_column(Integer)
     gap_s: Mapped[int | None] = mapped_column(Integer)
-    __table_args__ = (
-        Index("ix_pred_vehicle", "source", "stop_id", "line_id", "vehicle_id", "polled_at"),
-        Index("ix_pred_polled", "polled_at"),
-    )
+    # (An index on source, stop, line, vehicle, polled_at was dropped on 9 Nov 2026: 1.3 GB, slowing every insert,
+    # and only used by the 6-hourly evaluation join, which works without it.)
+    __table_args__ = (Index("ix_pred_polled", "polled_at"),)
 
 
 class ObservedArrival(Base):
@@ -202,6 +202,17 @@ class WatchedStop(Base):
     stop_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     name: Mapped[str | None] = mapped_column(String(120))
     last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class DaySample(Base):
+    """Which 1-in-`stride` sample (by prediction id) of a London day's predictions the evaluation reads. Recorded
+    before old days are thinned to that sample (evaluate.thin_history), so an interrupted run resumes with the same
+    stride and the evaluation keeps reading exactly the same predictions."""
+    __tablename__ = "day_samples"
+    source: Mapped[str] = mapped_column(String(10), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # London date, YYYY-MM-DD
+    stride: Mapped[int] = mapped_column(Integer)
+    thinned: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AppSecret(Base):
@@ -297,6 +308,9 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).
 _ADDED_INDEXES = [("ix_obs_arrived", "observed_arrivals", "arrived_at")]
 
+# Indexes removed from the models: dropped from existing databases at startup (see Prediction).
+_DROPPED_INDEXES = [("ix_pred_vehicle", "predictions")]
+
 
 def init_db(eng=None) -> None:
     """Create missing tables, columns and indexes. Each schema change runs only when it is actually needed, in its
@@ -320,3 +334,13 @@ def init_db(eng=None) -> None:
             if pg:
                 conn.execute(text("SET LOCAL lock_timeout = '10s'"))  # wait briefly for writers, never deadlock them
             conn.execute(text(stmt))
+    for name, table in _DROPPED_INDEXES:
+        if name in {i["name"] for i in insp.get_indexes(table)}:
+            try:  # optional: if the table is busy, the next start tries again
+                with eng.begin() as conn:
+                    if pg:
+                        conn.execute(text("SET LOCAL lock_timeout = '10s'"))
+                    conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+                logging.getLogger("paxen.db").info("dropped index %s", name)
+            except Exception as e:
+                logging.getLogger("paxen.db").warning("couldn't drop index %s yet: %s", name, type(e).__name__)
