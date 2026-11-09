@@ -125,7 +125,9 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
             best[pid] = (rank, Sample(aware(polled), line, stop, float(tts), hour_band(aware(polled)), cat != "good",
                                       err, quality, cat or "good", rank_q, gap, age, method, aware(arrived),
                                       f"{stop}|{line}|{vehicle}|{arrived:%Y%m%d%H%M%S}", bound_of(platform)))
-    out = [v[1] for v in best.values()]
+    # In prediction-id order before the (stable) sort by time, so the list, and any seeded sample drawn from it,
+    # doesn't depend on the order the database happened to return rows in.
+    out = [best[pid][1] for pid in sorted(best)]
     out.sort(key=lambda x: x.polled_at)
     return out
 

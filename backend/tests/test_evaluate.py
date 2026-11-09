@@ -173,3 +173,68 @@ def test_gbm_copes_with_signals_missing_from_older_recordings():
     m = GBMModel.from_params(GBMModel.fit(xs).to_params())
     p = m.predict(xs[0].line_id, xs[0].stop_id, xs[0].lead_s, xs[0].band, False, queue_rank=2, gap_s=120)
     assert p["q10_s"] <= p["bias_s"] <= p["q90_s"]
+
+
+# --------------------------------------------------------------------------- storage thinning (thin_history)
+
+def _record_days(session, days: int, per_day: int, start: datetime):
+    """per_day predictions a day (London days, GMT in November), each matched by a measured (darwin) arrival."""
+    from paxen.db import ObservedArrival, Prediction
+
+    for d in range(days):
+        for i in range(per_day):
+            polled = start + timedelta(days=d, minutes=10 + i * (1380 // per_day))
+            exp = polled + timedelta(seconds=300)
+            veh = f"v{d}-{i}"
+            session.add(Prediction(source="tfl", polled_at=polled.replace(tzinfo=None), stop_id="910GX", line_id="weaver",
+                                   mode="overground", direction="outbound", vehicle_id=veh,
+                                   expected_arrival=exp.replace(tzinfo=None), tts_s=300))
+            arr = (exp + timedelta(seconds=(i % 7) * 20 - 40)).replace(tzinfo=None)
+            session.add(ObservedArrival(source="tfl", stop_id="910GX", line_id="weaver", vehicle_id=veh,
+                                        direction="outbound", arrived_at=arr, earliest=arr, latest=arr,
+                                        method="darwin", quality=1.0))
+    session.commit()
+
+
+def _key(samples):
+    return [(x.polled_at, x.event, x.error_s) for x in samples]
+
+
+def test_thinning_keeps_exactly_what_the_evaluation_reads(session, monkeypatch):
+    from sqlalchemy import func, select
+
+    from paxen import evaluate as ev
+    from paxen.db import Prediction
+
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 5)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)  # stride = n // 10: 43 a day -> every 4th prediction is read
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_days(session, days=6, per_day=43, start=start)
+    before = ev.load_daily(session, "tfl", ("darwin",))
+    total = session.scalar(select(func.count()).select_from(Prediction))
+
+    now = start + timedelta(days=5, hours=12)  # 7 Nov: 4-6 Nov (and today) stay complete, 2-3 Nov are thinned
+    res = ev.thin_history(session, "tfl", now, max_days=10, pause_s=0)
+    assert len(res["days"]) == 2 and res["deleted"] > 0
+    assert session.scalar(select(func.count()).select_from(Prediction)) == total - res["deleted"]
+    after = ev.load_daily(session, "tfl", ("darwin",))
+    assert len(after) == len(before) > 0 and _key(after) == _key(before)
+
+    # the recent days are untouched, and a second run changes nothing
+    recent = session.scalar(select(func.count()).select_from(Prediction).where(
+        Prediction.polled_at >= (start + timedelta(days=2)).replace(tzinfo=None)))
+    assert recent == 4 * 43
+    assert ev.thin_history(session, "tfl", now, max_days=10, pause_s=0)["deleted"] == 0
+
+
+def test_thinning_goes_a_few_days_per_run(session, monkeypatch):
+    from paxen import evaluate as ev
+
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 5)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_days(session, days=6, per_day=43, start=start)
+    now = start + timedelta(days=5, hours=12)
+    assert len(ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"]) == 1
+    assert len(ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"]) == 1  # the next old day
+    assert ev.thin_history(session, "tfl", now, max_days=1, pause_s=0)["days"] == []

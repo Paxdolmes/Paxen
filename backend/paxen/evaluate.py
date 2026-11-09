@@ -10,12 +10,15 @@ import logging
 import statistics
 import sys
 from collections import defaultdict
+from datetime import datetime, timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import ModelVersion
+from .db import ModelVersion, Prediction
 from .forecast import Sample, lead_bucket, load_samples, model_kind
 from .models import CANDIDATES, SIMPLICITY, Conformal
+from .timeutil import LONDON, aware, naive_utc
 
 log = logging.getLogger("paxen.evaluate")
 
@@ -152,6 +155,32 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
 MAX_PER_DAY = 25_000  # memory guard: a fixed random sample of each day's training pairs
 PRESAMPLE = 4  # the database pre-sample keeps ~this many times MAX_PER_DAY predictions (not all have a match)
 
+# Storage (thin_history): a complete London day this many days old is reduced to the predictions load_daily reads.
+KEEP_FULL_DAYS = 3  # recent days stay complete: arrival inference and the Trackernet/Darwin matching use them
+THIN_DAYS_PER_RUN = 2  # days thinned per training run, so the deletes are spread over several runs
+THIN_SLICE = timedelta(minutes=10)  # each delete covers 10 minutes of polls (~12k rows) in its own transaction
+THIN_PAUSE_S = 5.0  # between slices: keeps the database's write-ahead log (on the same disk) small
+
+
+def day_windows(lo: datetime, hi: datetime):
+    """The London days from lo's day to hi, as (start, end) aware datetimes: the windows load_daily samples."""
+    day = aware(lo).astimezone(LONDON).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = aware(hi)
+    while day <= end:
+        nxt = (day + timedelta(days=1, hours=2)).replace(hour=0)  # DST-safe next local midnight
+        yield day, nxt
+        day = nxt
+
+
+def presample_stride(n: int) -> int:
+    """load_daily keeps every stride-th prediction (by id) of a day with n predictions."""
+    return max(1, (n or 0) // (MAX_PER_DAY * PRESAMPLE))
+
+
+def _day_count(s: Session, source: str, start: datetime, end: datetime) -> int:
+    return s.scalar(select(func.count()).select_from(Prediction).where(
+        Prediction.source == source, Prediction.polled_at >= naive_utc(start), Prediction.polled_at < naive_utc(end))) or 0
+
 
 def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: int = 0) -> list[Sample]:
     """Load history one London day at a time, keeping at most MAX_PER_DAY pairs per day (same seed, same sample).
@@ -159,31 +188,54 @@ def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: i
     Busy days are thinned in the database first (every n-th prediction by id), so memory stays bounded however
     much the recorder stores: a full day of the whole Tube network is ~13 million predictions."""
     import random
-    from datetime import timedelta
-
-    from sqlalchemy import func, select
-
-    from .db import Prediction
-    from .timeutil import LONDON, aware, naive_utc
 
     lo, hi = s.execute(select(func.min(Prediction.polled_at), func.max(Prediction.polled_at))
                        .where(Prediction.source == source)).one()
     if not lo:
         return []
-    day = aware(lo).astimezone(LONDON).replace(hour=0, minute=0, second=0, microsecond=0)
-    end = aware(hi)
     out: list[Sample] = []
-    while day <= end:
-        nxt = (day + timedelta(days=1, hours=2)).replace(hour=0)  # DST-safe next local midnight
-        n = s.scalar(select(func.count()).select_from(Prediction).where(
-            Prediction.source == source, Prediction.polled_at >= naive_utc(day), Prediction.polled_at < naive_utc(nxt)))
-        stride = max(1, (n or 0) // (MAX_PER_DAY * PRESAMPLE))
+    for day, nxt in day_windows(lo, hi):
+        stride = presample_stride(_day_count(s, source, day, nxt))
         batch = load_samples(s, source, since=day, until=nxt, methods=methods, stride=stride)
         if len(batch) > MAX_PER_DAY:
             batch = random.Random(f"{seed}-{day.date()}").sample(batch, MAX_PER_DAY)
         out += batch
-        day = nxt
     out.sort(key=lambda x: x.polled_at)
+    return out
+
+
+def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = KEEP_FULL_DAYS,
+                 max_days: int = THIN_DAYS_PER_RUN, pause_s: float = THIN_PAUSE_S) -> dict:
+    """Storage. The recorder keeps ~1.8 million predictions a day, but load_daily only ever reads every stride-th one
+    (by id) of a busy day. Once a day is `keep_full_days` old, delete the rest. Afterwards that day's stride is 1 and
+    load_daily reads exactly the same predictions, so no evaluation or training result changes (tests check this);
+    the raw archive still holds every original response. Deletes go 10 minutes of polls at a time, with pauses,
+    at most `max_days` days per run."""
+    import time
+
+    lo = s.scalar(select(func.min(Prediction.polled_at)).where(Prediction.source == source))
+    out: dict = {"days": [], "deleted": 0}
+    if not lo:
+        return out
+    cutoff = aware(now).astimezone(LONDON).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=keep_full_days)
+    for day, nxt in day_windows(lo, cutoff):
+        if nxt > cutoff or len(out["days"]) >= max_days:
+            break
+        k = presample_stride(_day_count(s, source, day, nxt))
+        if k == 1:
+            continue  # small or already thinned
+        a, end = naive_utc(day), naive_utc(nxt)
+        while a < end:
+            b = min(a + THIN_SLICE, end)
+            out["deleted"] += s.query(Prediction).filter(
+                Prediction.source == source, Prediction.polled_at >= a, Prediction.polled_at < b,
+                Prediction.id % k != 0).delete(synchronize_session=False)
+            s.commit()
+            a = b
+            if pause_s:
+                time.sleep(pause_s)
+        out["days"].append(f"{day.date()} (kept 1 in {k})")
     return out
 
 
