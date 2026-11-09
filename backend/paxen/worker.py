@@ -66,10 +66,20 @@ def train_once() -> None:
     log.info("train: %s | peak memory %s MB", res, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)
 
 
+def thin_once() -> None:
+    """One storage-thinning run, in its own process (started by the worker every 2 hours)."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    init_db()
+    res = workers.thin_tick()
+    logging.getLogger("paxen.thin").info("thin: %s", res)
+
+
 if __name__ == "__main__":
     import sys
 
     if "--train-once" in sys.argv:
         train_once()
+    elif "--thin-once" in sys.argv:
+        thin_once()
     else:
         asyncio.run(main())
