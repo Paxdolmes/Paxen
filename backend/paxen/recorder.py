@@ -447,10 +447,19 @@ def data_stats(s: Session, now: datetime, source: str) -> dict:
         ObservedArrival.source == source, ObservedArrival.arrived_at >= since).group_by(ObservedArrival.method)).all()
     out: dict = {"arrivals_24h": {m: n for m, n in sorted(rows)}}
     if pg:
-        size = lambda sql: round((s.scalar(text(sql)) or 0) / 1e6)  # noqa: E731
+        size = lambda sql: round(float(s.scalar(text(sql)) or 0) / 1e6)  # noqa: E731
         out["db_mb"] = size("SELECT pg_database_size(current_database())")
         out["predictions_mb"] = size("SELECT pg_total_relation_size('predictions')")
         out["arrivals_mb"] = size("SELECT pg_total_relation_size('observed_arrivals')")
+        # Index sizes and how often each is used (scans since the statistics were last reset), to find dead weight.
+        out["indexes"] = {name: {"mb": round(nbytes / 1e6), "scans": scans} for name, nbytes, scans in s.execute(text(
+            "SELECT indexrelname, pg_relation_size(indexrelid), idx_scan FROM pg_stat_user_indexes "
+            "WHERE relname IN ('predictions', 'observed_arrivals') ORDER BY indexrelname"))}
+        try:  # the write-ahead log shares the disk (needs a superuser or pg_monitor role)
+            with s.begin_nested():
+                out["wal_mb"] = size("SELECT COALESCE(sum(size), 0)::bigint FROM pg_ls_waldir()")
+        except Exception:
+            out["wal_mb"] = None
     _DATA_STATS[source] = (aware(now), out)
     return out
 
