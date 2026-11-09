@@ -10,3 +10,6 @@ node_modules/
 .DS_Store
 .numbat-cache/
 web/out/
+
+# CI only: the iPhone build's encrypted signing cache
+.signing-cache/

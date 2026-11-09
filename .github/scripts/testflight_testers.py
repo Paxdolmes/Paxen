@@ -75,6 +75,14 @@ def main() -> None:
                                                                    "attributes": {"usesNonExemptEncryption": False}}})
             print(f"  export compliance for build {b['attributes']['version']}: {'answered' if code < 300 else err(d)}")
 
+    # Distribution certificates: Apple allows only a few per team, so the iPhone build reuses one (ios_signing.py)
+    code, d = call("GET", "/certificates?filter[certificateType]=DISTRIBUTION,IOS_DISTRIBUTION&limit=50")
+    certs = d.get("data", []) if code < 300 else []
+    print(f"Distribution certificates: {len(certs)}" if code < 300 else f"Couldn't list certificates: {err(d)}")
+    for c in certs:
+        a = c["attributes"]
+        print(f"  {c['id']}: {a.get('certificateType')}, expires {str(a.get('expirationDate'))[:10]}")
+
     # 2. An internal group that gets every build automatically
     code, d = call("GET", f"/betaGroups?filter[app]={app}&limit=50")
     groups = [g for g in d.get("data", []) if g["attributes"].get("isInternalGroup")]
