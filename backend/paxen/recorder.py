@@ -429,6 +429,32 @@ def _row_count(s: Session, model, source: str | None) -> int:
     return s.scalar(select(func.count(model.id)).where((model.source == source) if source else True)) or 0
 
 
+DATA_STATS_TTL_S = 600
+_DATA_STATS: dict[str, tuple[datetime, dict]] = {}
+
+
+def data_stats(s: Session, now: datetime, source: str) -> dict:
+    """For /v1/health: how the ground truth is arriving (last 24 h, by method: trackernet, darwin, inferred...) and,
+    on Postgres, how much space the database uses. Cached for 10 minutes: the counts read a day of rows."""
+    hit = _DATA_STATS.get(source)
+    if hit and (aware(now) - hit[0]).total_seconds() < DATA_STATS_TTL_S:
+        return hit[1]
+    pg = s.get_bind().dialect.name == "postgresql"
+    if pg:
+        s.execute(text("SET LOCAL statement_timeout = '15s'"))  # never let a slow count hold up the health check
+    since = naive_utc(now - timedelta(hours=24))
+    rows = s.execute(select(ObservedArrival.method, func.count()).where(
+        ObservedArrival.source == source, ObservedArrival.arrived_at >= since).group_by(ObservedArrival.method)).all()
+    out: dict = {"arrivals_24h": {m: n for m, n in sorted(rows)}}
+    if pg:
+        size = lambda sql: round((s.scalar(text(sql)) or 0) / 1e6)  # noqa: E731
+        out["db_mb"] = size("SELECT pg_database_size(current_database())")
+        out["predictions_mb"] = size("SELECT pg_total_relation_size('predictions')")
+        out["arrivals_mb"] = size("SELECT pg_total_relation_size('observed_arrivals')")
+    _DATA_STATS[source] = (aware(now), out)
+    return out
+
+
 def feed_health(s: Session, now: datetime, source: str | None = None, counts: bool = True) -> dict:
     src = (RawSnapshot.source == source) if source else True
     last = s.scalar(select(func.max(RawSnapshot.polled_at)).where(RawSnapshot.status > 0, src))
