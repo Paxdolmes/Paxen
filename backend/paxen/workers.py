@@ -123,6 +123,10 @@ def train_tick() -> dict:
             res = {"status": rep["status"], "winner": rep.get("winner"), "days": rep["days"],
                    "ground_truth": rep.get("ground_truth"), "message": rep.get("message")}
         prune(s, utcnow())
+        if not isinstance(provider, SimProvider):
+            from .evaluate import thin_history
+
+            res["thinned"] = thin_history(s, provider.name, utcnow())
         return res
 
 

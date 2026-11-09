@@ -154,3 +154,17 @@ written before its results are seen.
 platform countdowns), and Darwin's minute rounding adds up to ±30 s of noise that Trackernet doesn't have. Pooling
 them would change the headline metric after the protocol was registered.
 
+---
+
+## Storage note (9 November 2026, before any multi-day results; not a change to the protocol)
+
+The recorder stores about 1.8 million predictions a day, but `load_daily` only ever reads every stride-th one (by
+prediction id) of a busy day, where stride = day's predictions // (MAX_PER_DAY x PRESAMPLE). From 9 November,
+`thin_history` deletes the other predictions of each London day once it is 3 days old (recent days stay complete for
+arrival inference and the Trackernet/Darwin matching). Afterwards that day's stride is 1 and `load_daily` reads exactly
+the same predictions, so every report and promotion decision is unchanged; tests check this on SQLite and Postgres.
+Arrivals are not thinned, and the raw archive keeps every original response.
+
+At the same time, `load_samples` now returns pairs in prediction-id order before sorting them by time, so the seeded
+per-day sample (rule: "same seed, same sample") no longer depends on the order the database returns rows in.
+
