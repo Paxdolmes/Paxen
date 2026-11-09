@@ -209,7 +209,9 @@ class DarwinRecorder(threading.Thread):
             "bootstrap.servers": os.environ["DARWIN_BOOTSTRAP"], "security.protocol": "SASL_SSL",
             "sasl.mechanisms": "PLAIN", "sasl.username": os.environ["DARWIN_USERNAME"],
             "sasl.password": os.environ["DARWIN_PASSWORD"], "group.id": os.getenv("DARWIN_GROUP") or "paxen",
-            "auto.offset.reset": "latest", "enable.auto.commit": True})
+            "auto.offset.reset": "latest", "enable.auto.commit": True,
+            # The feed is ~100 KB/s and read as it arrives: an 8 MB read-ahead is plenty (the default allows 64 MB).
+            "queued.max.messages.kbytes": 8192, "queued.min.messages": 1000})
         c.subscribe([os.environ["DARWIN_TOPIC"]])
         return c
 

@@ -285,8 +285,11 @@ class ModelVersion(Base):
 
 def make_engine(url: str | None = None):
     url = normalise_db_url(url or settings.database_url)
-    kw = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {"pool_pre_ping": True}
-    return create_engine(url, **kw)
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    # Railway bills the memory each service uses, and a Postgres connection keeps the memory its biggest query
+    # needed until it closes. So: a small pool, and every connection replaced after 10 minutes.
+    return create_engine(url, pool_pre_ping=True, pool_size=3, max_overflow=5, pool_recycle=600)
 
 
 engine = make_engine()
