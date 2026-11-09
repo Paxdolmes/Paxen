@@ -1,25 +1,26 @@
-# One-off: copies the iPhone build's encrypted signing cache from its old location (inside the Mac runner's temp
-# folder, which only Mac jobs can restore) to the workspace-relative one the daily Linux job keeps alive.
-# Run by hand once; about a minute on a Mac. Safe to run again.
+# One-off: copies the iPhone build's encrypted signing cache from its old location (the Mac runner's temp folder)
+# to the workspace-relative one that the daily Linux job keeps alive. Runs on Linux: GitHub identifies a cache by
+# its path text, so the Mac path is given literally; the files land in this runner's temp folder. Safe to re-run.
 name: Move the iPhone signing cache
 on:
   workflow_dispatch:
 jobs:
   move:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Restore from the old location
         id: old
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/signing-cache
+          path: /Users/runner/work/_temp/signing-cache
           key: paxen-signing-none
           restore-keys: paxen-signing-
       - name: Copy
         run: |
-          test -f "$RUNNER_TEMP/signing-cache/dist.p12" || { echo "No cached certificate at the old location"; exit 1; }
-          cp -R "$RUNNER_TEMP/signing-cache" .signing-cache
+          src="$RUNNER_TEMP/signing-cache"
+          test -f "$src/dist.p12" || { echo "No cached certificate found (matched: '${{ steps.old.outputs.cache-matched-key }}')"; ls -la "$RUNNER_TEMP"; exit 1; }
+          cp -R "$src" .signing-cache
           echo "Copied the cache saved as ${{ steps.old.outputs.cache-matched-key }}"
       - name: Save at the new location
         uses: actions/cache/save@v4
