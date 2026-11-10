@@ -183,7 +183,7 @@ export function LiveTripScreen({ active, onClose }: { active: ActiveTrip; onClos
             aria-label={follow ? 'Stop following my position' : 'Follow my position'}
             className="absolute bottom-3 right-3 z-[500] flex size-11 items-center justify-center rounded-full bg-px-surface shadow-md"
           >
-            {follow ? <LocateFixed className="size-5 text-px-accent" aria-hidden /> : <Crosshair className="size-5" aria-hidden />}
+            {follow ? <LocateFixed className="size-5 text-px-brand" aria-hidden /> : <Crosshair className="size-5" aria-hidden />}
           </button>
         )}
       </div>

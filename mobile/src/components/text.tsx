@@ -7,7 +7,6 @@ export type TextTone =
   | 'secondary'
   | 'tertiary'
   | 'brand'
-  | 'accent'
   | 'success'
   | 'watch'
   | 'attention'
@@ -20,7 +19,6 @@ export const toneColor = (p: Palette, tone: TextTone): string | undefined =>
     secondary: p.textSecondary,
     tertiary: p.textTertiary,
     brand: p.brand,
-    accent: p.accent,
     success: p.success,
     watch: p.watch,
     attention: p.attention,

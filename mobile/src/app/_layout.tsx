@@ -1,13 +1,11 @@
 import { useEffect } from 'react'
 import { AppState, useColorScheme } from 'react-native'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router } from 'expo-router'
-import { useFonts } from 'expo-font'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { SWRConfig } from 'swr'
 import { palettes } from '@/shared/paxen-tokens'
-import { fonts } from '@/lib/fonts'
 import { revalidateAll, useToken } from '@/lib/hooks'
 import { initPush } from '@/lib/push'
 
@@ -20,12 +18,10 @@ export default function RootLayout() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light'
   const p = palettes[scheme]
   const token = useToken()
-  const [fontsLoaded, fontError] = useFonts(fonts)
-  const fontsReady = fontsLoaded || !!fontError // without the font the wordmark falls back to the system face
 
   useEffect(() => {
-    if (token !== undefined && fontsReady) void SplashScreen.hideAsync().catch(() => {})
-  }, [token, fontsReady])
+    if (token !== undefined) void SplashScreen.hideAsync().catch(() => {})
+  }, [token])
 
   useEffect(() => initPush((route) => router.push(route as never), !!token), [token])
 
@@ -35,7 +31,7 @@ export default function RootLayout() {
   }, [])
 
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme
-  const theme = { ...base, colors: { ...base.colors, primary: p.accent, background: p.canvas, card: p.surface, text: p.text, border: p.border } }
+  const theme = { ...base, colors: { ...base.colors, primary: p.brand, background: p.canvas, card: p.surface, text: p.text, border: p.border } }
 
   return (
     <SafeAreaProvider>

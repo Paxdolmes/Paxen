@@ -65,7 +65,7 @@ function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedba
       <View accessibilityLabel="Was this alert helpful?" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {FEEDBACK.map(({ value, label, icon: Icon }) => {
           const sel = alert.feedback === value
-          const fg = sel ? p.onAccent : p.text
+          const fg = sel ? p.onBrand : p.text
           return (
             <Pressable
               key={value}
@@ -78,8 +78,8 @@ function AlertCard({ alert, onFeedback }: { alert: Alert; onFeedback: (f: Feedba
                 paddingHorizontal: 16,
                 borderRadius: radii.pill,
                 borderWidth: 1,
-                borderColor: sel ? p.accent : p.borderStrong,
-                backgroundColor: sel ? p.accent : p.surface,
+                borderColor: sel ? p.brand : p.borderStrong,
+                backgroundColor: sel ? p.brand : p.surface,
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,

@@ -57,8 +57,6 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
 
   return (
     <Card style={{ overflow: 'hidden' }}>
-      {/* The "pale": a thin crimson band down the left edge, used only here and in the app icon. */}
-      <View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: p.accent, zIndex: 10 }} />
       <View style={{ backgroundColor: meta.bg, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, gap: 8 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
@@ -222,8 +220,8 @@ export function TripInProgress({ trip }: { trip: ActiveTrip }) {
   return (
     <View style={{ gap: 16 }} accessibilityLiveRegion="polite">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Navigation size={16} color={p.accent} />
-        <Text variant="footnote" tone="accent" style={{ fontWeight: '700', flex: 1 }}>
+        <Navigation size={16} color={p.brand} />
+        <Text variant="footnote" tone="brand" style={{ fontWeight: '700', flex: 1 }}>
           {ended ? 'Trip finished' : 'On your way'} · {trip.summary}
         </Text>
       </View>

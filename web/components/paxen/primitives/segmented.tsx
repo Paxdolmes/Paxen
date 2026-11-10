@@ -53,7 +53,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, s
               scroll ? 'rounded-full border px-4' : 'flex-1',
               selected
                 ? scroll
-                  ? 'border-px-accent bg-px-accent text-px-on-accent'
+                  ? 'border-px-brand bg-px-brand text-px-on-brand'
                   : 'bg-px-surface text-px-text shadow-px-card'
                 : scroll
                   ? 'border-px-border-strong bg-px-surface text-px-text-secondary'

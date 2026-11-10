@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { ImageResponse } from 'next/og'
 import { palettes } from '@/lib/paxen-tokens'
 
@@ -11,32 +9,10 @@ export function generateStaticParams() {
   return [...ALLOWED].map((size) => ({ size: String(size) }))
 }
 
-// Cinzel 700, subset to the single glyph "P" (SIL Open Font License), vendored so the build needs no network.
-const cinzel = readFile(join(process.cwd(), 'assets/cinzel-700-p.ttf'))
-
 export async function GET(_req: Request, { params }: { params: Promise<{ size: string }> }) {
   const { size: raw } = await params
   const size = ALLOWED.has(Number(raw)) ? Number(raw) : 192
-  const { border: silver, accent: crimson, text: ink, surface: outline } = palettes.light
-  // A white keyline (as on the crest) lets the ink "P" read on both the silver field and the crimson pale: a
-  // white-stroked "P" underneath, the ink "P" on top. (One centred stroke; offset text-shadows render lopsided.)
-  const k = Math.max(1, Math.round(size * 0.012))
-  const letter = {
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontFamily: 'Cinzel',
-    fontWeight: 700,
-    fontSize: size * 0.62,
-    lineHeight: 1,
-    paddingTop: size * 0.04,
-    paddingLeft: size * 0.03,
-  }
+  const { brand, onBrand, attention } = palettes.light
 
   return new ImageResponse(
     (
@@ -47,28 +23,28 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: silver,
+          background: brand,
+          color: onBrand,
+          fontSize: size * 0.56,
+          fontWeight: 700,
+          letterSpacing: -size * 0.03,
           position: 'relative',
         }}
       >
+        <span style={{ marginTop: -size * 0.06 }}>p</span>
         <div
           style={{
             position: 'absolute',
-            top: 0,
-            bottom: 0,
-            left: (size - size * 0.22) / 2,
-            width: size * 0.22,
-            background: crimson,
+            right: size * 0.24,
+            bottom: size * 0.26,
+            width: size * 0.1,
+            height: size * 0.1,
+            borderRadius: size,
+            background: attention,
           }}
         />
-        <div style={{ ...letter, color: outline, WebkitTextStroke: `${k * 2}px ${outline}` }}>P</div>
-        <div style={{ ...letter, color: ink }}>P</div>
       </div>
     ),
-    {
-      width: size,
-      height: size,
-      fonts: [{ name: 'Cinzel', data: await cinzel, weight: 700, style: 'normal' }],
-    },
+    { width: size, height: size },
   )
 }
