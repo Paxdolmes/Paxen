@@ -148,6 +148,7 @@ class CommuteIn(BaseModel):
     window_end: str = HHMM
     preference: Pref = "balanced"
     alerts_enabled: bool = True
+    briefing_at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("days")
     @classmethod
@@ -164,6 +165,7 @@ class CommutePatch(BaseModel):
     window_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     preference: Pref | None = None
     alerts_enabled: bool | None = None
+    briefing_at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # null turns it off
 
 
 class Window(BaseModel):
@@ -324,7 +326,8 @@ def push_unsubscribe(u: User = Depends(current_user), s: Session = Depends(db)):
 @app.post("/v1/push/test")
 def push_test(u: User = Depends(current_user), s: Session = Depends(db)):
     """A test notification to this user's device: the iPhone app (APNs) or the web app (web push)."""
-    title, body = "Paxen", "Notifications are working. We'll tell you when your commute isn't normal."
+    title, body = "Paxen", ("Notifications are working. You'll get your daily briefing if you've set one, and an "
+                            "alert whenever your commute isn't normal.")
     if (u.push_token or "").startswith("apns:"):
         from .apns import send as apns_send
 

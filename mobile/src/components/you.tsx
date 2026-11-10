@@ -90,11 +90,19 @@ function PlaceEditor({ place, onClose }: { place: Place; onClose: () => void }) 
   )
 }
 
+/** 15 minutes before the commute's window: a sensible first suggestion for the briefing time. */
+function briefingDefault(windowStart: string): string {
+  const [h, m] = windowStart.split(':').map(Number)
+  const t = (h * 60 + m - 15 + 1440) % 1440
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+}
+
 function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => void }) {
   const [days, setDays] = useState(commute.days)
   const [start, setStart] = useState(commute.window_start)
   const [end, setEnd] = useState(commute.window_end)
   const [pref, setPref] = useState<Preference>(commute.preference)
+  const [briefing, setBriefing] = useState<string | null>(commute.briefing_at ?? null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const invalid = days.length === 0 || start >= end
@@ -102,7 +110,7 @@ function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => 
     setSaving(true)
     setError(null)
     try {
-      await api.patchCommute(commute.id, { days, window_start: start, window_end: end, preference: pref })
+      await api.patchCommute(commute.id, { days, window_start: start, window_end: end, preference: pref, briefing_at: briefing })
       await revalidateAll()
       onClose()
     } catch (e) {
@@ -134,6 +142,23 @@ function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => 
           <TimeField label="Until" value={end} onChange={setEnd} />
         </View>
         <SelectField label="Route preference" value={pref} options={PREFERENCES.map((v) => ({ value: v, label: PREFERENCE_LABELS[v] }))} onChange={setPref} />
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text variant="callout">Daily briefing</Text>
+              <Text variant="footnote" tone="secondary">
+                A notification at a time you choose: how today compares with normal, and whether to stick to your usual route or take a quicker one.
+              </Text>
+            </View>
+            <Switch checked={briefing != null} onChange={(v) => setBriefing(v ? briefingDefault(start) : null)} label={`Daily briefing for ${commute.name}`} />
+          </View>
+          {briefing != null && (
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TimeField label="Send at" value={briefing} onChange={setBriefing} />
+              <View style={{ flex: 1 }} />
+            </View>
+          )}
+        </View>
         {invalid && (
           <Text variant="footnote" tone="watch">
             Pick at least one day and a window that ends after it starts.
@@ -216,11 +241,14 @@ export function CommuteSettings({ commutes }: { commutes: Commute[] }) {
           {commutes.map((c, i) => (
             <View key={c.id}>
               {i > 0 && <Divider />}
-              <Button variant="ghost" accessibilityLabel={`Edit ${c.name}`} onPress={() => setEditCommute(c)} style={{ height: undefined, borderRadius: 0, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, alignSelf: 'stretch', justifyContent: 'space-between' }}>
+              <Button variant="ghost" accessibilityLabel={`Edit ${c.name}`} onPress={() => setEditCommute(c)} style={{ height: 'auto', minHeight: 56, borderRadius: 0, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, alignSelf: 'stretch', justifyContent: 'space-between' }}>
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text variant="headline">{c.name}</Text>
                   <Text variant="footnote" tone="secondary" tabular>
                     {fmtDays(c.days)} · {c.window_start}–{c.window_end} · {PREFERENCE_LABELS[c.preference]}
+                  </Text>
+                  <Text variant="footnote" tone={c.briefing_at ? 'secondary' : 'tertiary'} tabular>
+                    {c.briefing_at ? `Daily briefing at ${c.briefing_at}` : 'Daily briefing: off'}
                   </Text>
                   {c.usual_summary ? (
                     <Text variant="footnote" tone="tertiary">

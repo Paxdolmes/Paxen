@@ -54,6 +54,9 @@ export interface Commute {
   window_end: string
   preference: Preference
   alerts_enabled: boolean
+  // daily briefing push at this London time (HH:MM) on the commute's days: how today compares with normal and
+  // whether to stick to the usual route. null: off
+  briefing_at?: string | null
   usual_summary: string | null // "Victoria"
   usual_signature: string | null
 }
@@ -297,7 +300,7 @@ export interface Alert {
   id: string
   commute_id: string | null
   created_at: string
-  kind: 'better_route' | 'leave_earlier' | 'usual_unavailable'
+  kind: 'better_route' | 'leave_earlier' | 'usual_unavailable' | 'briefing'
   title: string
   body: string
   confidence: Confidence
@@ -367,7 +370,7 @@ POST   /v1/onboarding  { name?, home: PlaceIn, work: PlaceIn, days, morning: {st
                                          PlaceIn = { label, name, lat, lon, source }
 GET    /v1/places/search?q=              -> PlaceSearchResult[]
 GET    /v1/places | PATCH /v1/places/:id | DELETE /v1/places/:id
-GET    /v1/commutes | PATCH /v1/commutes/:id { days?, window_start?, window_end?, preference?, alerts_enabled? }
+GET    /v1/commutes | PATCH /v1/commutes/:id { days?, window_start?, window_end?, preference?, alerts_enabled?, briefing_at? }
 GET    /v1/commutes/:id/compare?preference=&depart_at=   -> CommuteEvaluation (all options)
 PUT    /v1/commutes/:id/usual { signature }              -> Commute
 GET    /v1/dashboard                     -> Dashboard

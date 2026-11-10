@@ -94,6 +94,13 @@ def monitor_tick() -> int:
             close_stale(s, now)
         except Exception:
             log.exception("closing stale trips failed")
+        try:
+            from .briefing import send_due
+
+            sent += send_due(s, provider, now, fresh, deliver)  # daily briefings at the times users chose
+        except Exception:
+            log.exception("briefings failed")
+            s.rollback()
         for c in s.scalars(select(Commute).where(Commute.alerts_enabled.is_(True))):
             if c.user.monitoring_paused or not is_active_window(c, now):
                 continue

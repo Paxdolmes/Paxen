@@ -460,6 +460,9 @@ def data_stats(s: Session, now: datetime, source: str) -> dict:
     from .fullness import calibration
 
     out["boarding_reports"] = calibration(s)  # how the train fullness estimate compares with what riders say
+    from .notify import push_stats
+
+    out["push"] = push_stats(s, now)  # are alerts reaching phones? (counts only)
     if pg:
         size = lambda sql: round(float(s.scalar(text(sql)) or 0) / 1e6)  # noqa: E731
         out["db_mb"] = size("SELECT pg_database_size(current_database())")

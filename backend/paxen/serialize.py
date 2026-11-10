@@ -19,7 +19,7 @@ def place(p: Place) -> dict:
 def commute(c: Commute) -> dict:
     return {"id": c.id, "name": c.name, "origin": place(c.origin), "dest": place(c.dest), "days": c.days,
             "window_start": c.window_start, "window_end": c.window_end, "preference": c.preference,
-            "alerts_enabled": c.alerts_enabled, "usual_summary": c.usual_summary,
+            "alerts_enabled": c.alerts_enabled, "briefing_at": c.briefing_at, "usual_summary": c.usual_summary,
             "usual_signature": c.usual_signature}
 
 
