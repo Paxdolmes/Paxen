@@ -39,6 +39,9 @@ class User(Base):
     monitoring_paused: Mapped[bool] = mapped_column(Boolean, default=False)
     alert_threshold_min: Mapped[int] = mapped_column(Integer, default=8)  # how much slower than normal before we alert
     min_gain_min: Mapped[int] = mapped_column(Integer, default=5)  # how much better an alternative must be
+    # Automatic trips (paxen/autotrips.py): the phone reports leaving/reaching Home and Work; times only, no positions
+    auto_trips: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_trip_stats: Mapped[dict | None] = mapped_column(JSON)  # {"recorded": n, "skipped": {reason: n}, "last": ...}
     places = relationship("Place", cascade="all, delete-orphan", back_populates="user")
     commutes = relationship("Commute", cascade="all, delete-orphan", back_populates="user")
 
@@ -98,7 +101,8 @@ class Trip(Base):
     source: Mapped[str] = mapped_column(String(20), default="app")  # app | manual | detected
     # Live trips: the route as chosen (legs, stops, shape) and how the trip ended. Positions are never stored.
     plan: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str | None] = mapped_column(String(20))  # active | arrived | auto_closed
+    # active | arrived | pending (detected departure) | too_fast | too_slow | auto_closed (invalid: see live.INVALID)
+    status: Mapped[str | None] = mapped_column(String(20))
 
 
 class Alert(Base):
@@ -305,7 +309,9 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("predictions", "platform", "VARCHAR(60)"),
                   ("predictions", "queue_rank", "INTEGER"),
                   ("predictions", "gap_s", "INTEGER"),
-                  ("users", "web_push", "JSON")]
+                  ("users", "web_push", "JSON"),
+                  ("users", "auto_trips", "BOOLEAN DEFAULT FALSE"),
+                  ("users", "auto_trip_stats", "JSON")]
 
 
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).

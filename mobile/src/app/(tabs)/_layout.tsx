@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 import { Redirect, Tabs } from 'expo-router'
 import { Activity, Bell, Route, Sun, UserRound } from 'lucide-react-native'
+import { resumeAutoTrips } from '@/lib/autotrips'
 import { useDashboard, useToken } from '@/lib/hooks'
 import { usePalette } from '@/lib/theme'
 
@@ -8,6 +10,10 @@ export default function TabsLayout() {
   const p = usePalette()
   const token = useToken()
   const { data: dashboard, error } = useDashboard(!!token)
+  const autoTrips = !!dashboard?.user.auto_trips
+  useEffect(() => {
+    resumeAutoTrips(autoTrips).catch(() => {})
+  }, [autoTrips])
 
   if (token === undefined || (token && !dashboard && !error)) {
     return (

@@ -131,6 +131,9 @@ export const api = {
   patchMe: (patch: Partial<User>) => request<User>('PATCH', '/v1/me', patch),
   setPushToken: (push_token: string | null) => request<User>('PATCH', '/v1/me', { push_token }),
   testPush: () => request<{ result: 'sent' | 'gone' | 'failed' }>('POST', '/v1/push/test'),
+  /** Automatic trips: the phone left or reached Home/Work (an iOS geofence). Which place and when; no position. */
+  tripEvent: (place_id: string, event: 'enter' | 'exit', at: string) =>
+    request<{ action: string; reason?: string }>('POST', '/v1/trips/events', { place_id, event, at }),
   deleteMe: () => request<unknown>('DELETE', '/v1/me'),
   deleteHistory: () => request<{ trips_deleted: number; alerts_deleted: number }>('DELETE', '/v1/me/history'),
   onboarding: (body: OnboardingIn) => request<unknown>('POST', '/v1/onboarding', body),

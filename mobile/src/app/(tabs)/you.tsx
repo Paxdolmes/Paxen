@@ -2,7 +2,7 @@ import { View } from 'react-native'
 import { useDashboard } from '@/lib/hooks'
 import { Screen } from '@/components/screen'
 import { ErrorState, Skeleton } from '@/components/ui'
-import { AlertSettings, CommuteSettings, InsightsSection, PrivacySection, SimulatorSection } from '@/components/you'
+import { AlertSettings, AutoTripsSection, CommuteSettings, InsightsSection, PrivacySection, SimulatorSection } from '@/components/you'
 
 export default function YouScreen() {
   const { data, error, isLoading, mutate } = useDashboard()
@@ -26,6 +26,7 @@ export default function YouScreen() {
   return (
     <Screen title={data.user.name || 'You'} gap={32} onRefresh={() => mutate()}>
       <CommuteSettings commutes={data.commutes.map((c) => c.commute)} />
+      <AutoTripsSection user={data.user} />
       <AlertSettings user={data.user} />
       <InsightsSection />
       <PrivacySection />

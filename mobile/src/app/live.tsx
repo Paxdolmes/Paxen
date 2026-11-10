@@ -97,6 +97,8 @@ function Ended({ trip, onDone }: { trip: LiveTrip; onDone: () => void }) {
             } This trip now helps Paxen learn your normal.`
           : trip.status === 'too_fast'
             ? `That was quicker than the route allows, so this trip won't be used to learn your normal.`
+            : trip.status === 'too_slow'
+              ? `That took much longer than any route would, so it looks like there was a stop on the way. It won't be used to learn your normal.`
             : `We didn't see you arrive, so this trip won't be used to learn your normal.`}
       </Text>
       <Button block onPress={onDone}>

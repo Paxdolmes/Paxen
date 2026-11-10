@@ -63,14 +63,32 @@ def _by_clock(plan: dict, elapsed_min: float) -> tuple[int, float]:
 
 
 TOO_FAST = 0.5  # faster than half the quickest forecast: GPS error, a test, or started at the destination
+# Slower than the slowest likely route by this much (minutes, or share of the forecast if larger): a stop on the way,
+# a detour or a different trip altogether, not a commute time to learn from.
+TOO_SLOW_MIN, TOO_SLOW_SHARE = 8.0, 0.2
+INVALID = ("too_fast", "too_slow", "auto_closed")  # never learned from; deleted after a day (close_stale)
+
+
+def judge(duration_min: float, p10: float | None, p50: float | None, p90: float | None,
+          slowest_p90: float | None = None) -> str:
+    """'ok', 'too_fast' or 'too_slow': whether a door-to-door time is a real commute to learn from."""
+    if p10 and duration_min < TOO_FAST * p10:
+        return "too_fast"
+    ceiling = max([x for x in (p90, slowest_p90) if x], default=None)
+    if ceiling and duration_min > ceiling + max(TOO_SLOW_MIN, TOO_SLOW_SHARE * (p50 or ceiling)):
+        return "too_slow"
+    return "ok"
 
 
 def finish(trip: Trip, arrived: datetime, status: str = "arrived") -> None:
     if status == "arrived":
         dur = (arrived - aware(trip.started_at)).total_seconds() / 60
-        p10 = ((trip.plan or {}).get("forecast") or {}).get("p10") or trip.forecast_p10
-        if p10 and dur < TOO_FAST * p10:
-            trip.status = "too_fast"  # kept out of the learning data: not a real door-to-door time
+        fc = (trip.plan or {}).get("forecast") or {}
+        verdict = judge(dur, fc.get("p10") or trip.forecast_p10, fc.get("p50") or trip.forecast_p50,
+                        fc.get("p90") or trip.forecast_p90, ((trip.plan or {}).get("auto") or {}).get("slowest_p90"))
+        if verdict != "ok":
+            trip.status = verdict  # kept out of the learning data, and deleted after a day
+            trip.arrived_at, trip.duration_min = naive_utc(arrived), None
             return
         trip.arrived_at, trip.duration_min = naive_utc(arrived), round(max(0.5, dur), 1)
     trip.status = status
@@ -85,7 +103,7 @@ def live_status(s: Session, provider: Provider, trip: Trip, now: datetime,
             "elapsed_min": round(elapsed, 1), "legs": plan.get("legs", []), "dest": plan.get("dest"),
             "origin": plan.get("origin"), "forecast_at_start": plan.get("forecast")}
 
-    if trip.status in ("arrived", "auto_closed", "too_fast"):
+    if trip.status in ("arrived", *INVALID):
         return {**base, "status": trip.status, "duration_min": trip.duration_min,
                 "vs_forecast_min": _vs(trip)}
     dest = plan.get("dest") or {}
@@ -147,8 +165,12 @@ def _vs(trip: Trip) -> float | None:
 
 
 def close_stale(s: Session, now: datetime) -> int:
-    """Worker: close trips that were never seen to arrive (app closed). They're kept out of the learning data."""
-    from sqlalchemy import select
+    """Worker: close trips that were never seen to arrive (app closed), drop detected departures that never reached
+    the other end, and delete invalid trips once the app has had a day to show how they ended. Nothing invalid is
+    kept, and none of it is ever learned from."""
+    from sqlalchemy import delete, select
+
+    from .autotrips import MAX_TRIP
 
     n = 0
     for t in s.scalars(select(Trip).where(Trip.status == "active")):
@@ -156,5 +178,7 @@ def close_stale(s: Session, now: datetime) -> int:
         if (now - aware(t.started_at)).total_seconds() / 60 > p90 + STALE_AFTER_MIN:
             finish(t, now, "auto_closed")
             n += 1
+    s.execute(delete(Trip).where(Trip.status == "pending", Trip.started_at < naive_utc(now - MAX_TRIP)))
+    s.execute(delete(Trip).where(Trip.status.in_(INVALID), Trip.started_at < naive_utc(now - timedelta(days=1))))
     s.commit()
     return n

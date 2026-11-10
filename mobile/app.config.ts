@@ -20,7 +20,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSLocationWhenInUseUsageDescription:
-        'Paxen uses your location only while a live trip is open, to show your progress. It is never stored.',
+        'Paxen uses your location while a live trip is open, to show your progress. It is never stored.',
       UIBackgroundModes: ['remote-notification'],
     },
   },
@@ -32,7 +32,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ['expo-notifications', { mode: 'production' }],
     [
       'expo-location',
-      { locationWhenInUsePermission: 'Paxen uses your location only while a live trip is open, to show your progress. It is never stored.' },
+      {
+        locationWhenInUsePermission: 'Paxen uses your location while a live trip is open, to show your progress. It is never stored.',
+        // Automatic trips (optional, off by default): region monitoring of Home and Work. No background location mode:
+        // iOS wakes the app for area crossings without it.
+        locationAlwaysAndWhenInUsePermission:
+          'With automatic trips on, Paxen notices when you leave or reach Home and Work, to time your commute. It only notes the time, never where you are.',
+        locationAlwaysPermission:
+          'With automatic trips on, Paxen notices when you leave or reach Home and Work, to time your commute. It only notes the time, never where you are.',
+      },
     ],
     '@react-native-community/datetimepicker',
   ],

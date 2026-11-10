@@ -26,7 +26,8 @@ def commute(c: Commute) -> dict:
 def user(u: User) -> dict:
     return {"id": u.id, "name": u.name, "quiet_start": u.quiet_start, "quiet_end": u.quiet_end,
             "monitoring_paused": u.monitoring_paused, "alert_threshold_min": u.alert_threshold_min,
-            "min_gain_min": u.min_gain_min, "push_enabled": bool(u.push_token or u.web_push)}
+            "min_gain_min": u.min_gain_min, "push_enabled": bool(u.push_token or u.web_push),
+            "auto_trips": bool(u.auto_trips), "auto_trip_stats": u.auto_trip_stats or {}}
 
 
 def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) -> dict:
