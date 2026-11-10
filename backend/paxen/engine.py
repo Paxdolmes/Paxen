@@ -792,6 +792,10 @@ def maybe_alert(s: Session, ev: CommuteEvaluation, now: datetime, force: bool = 
     if not force and prior and prior.kind == kind and prior.recommended_signature == rec_sig and \
             abs((prior.delta_min or 0) - (ev.delta_min or 0)) < 10:
         return None  # nothing materially new since the last alert
+    from .briefing import recently_briefed
+
+    if not force and recently_briefed(s, c.id, now, rec_sig, ev.delta_min):
+        return None  # the daily briefing has just said this
 
     title = ev.headline.upper() if kind != "usual_unavailable" else "YOUR USUAL ROUTE ISN'T RUNNING"
     alert = Alert(user_id=u.id, commute_id=c.id, kind=kind, title=ev.headline, body=ev.detail,

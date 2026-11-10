@@ -77,6 +77,8 @@ class Commute(Base):
     usual_summary: Mapped[str | None] = mapped_column(String(200))
     usual_nominal_min: Mapped[float | None] = mapped_column(Float)
     alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # daily briefing push at this London time (HH:MM) on the commute's days; None: off (paxen/briefing.py)
+    briefing_at: Mapped[str | None] = mapped_column(String(5))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     user = relationship("User", back_populates="commutes")
     origin = relationship("Place", foreign_keys=[origin_id])
@@ -329,7 +331,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("predictions", "gap_s", "INTEGER"),
                   ("users", "web_push", "JSON"),
                   ("users", "auto_trips", "BOOLEAN DEFAULT FALSE"),
-                  ("users", "auto_trip_stats", "JSON")]
+                  ("users", "auto_trip_stats", "JSON"),
+                  ("commutes", "briefing_at", "VARCHAR(5)")]
 
 
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).

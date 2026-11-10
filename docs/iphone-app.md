@@ -54,6 +54,22 @@ review. The first review takes about a day; later builds are usually approved wi
 TestFlight app, open the link, and get every new build automatically. Test information and the review contact were
 set on the first run (workflow inputs); the privacy policy is served by the API at `/privacy` (`backend/paxen/privacy.py`).
 
+## Notifications
+Two kinds reach the phone through APNs (`backend/paxen/apns.py`; the API and the worker both need `APNS_KEY_ID`,
+`APNS_TEAM_ID` and `APNS_PRIVATE_KEY`, because the worker sends the scheduled ones):
+
+- **Daily briefing** (`briefing.py`), at the time set per commute in You, on the commute's days. For example:
+  "To work: 6 min slower than normal / About 38 min today (usually 32). Take the Victoria → Central instead: 7 min
+  quicker than your usual route. Leave 08:00, arrive about 08:31." It is sent even when everything is normal.
+  Tapping it opens Today.
+- **Alerts** (`engine.maybe_alert`), only when the usual route becomes clearly slower or stops running, inside the
+  commute's travel window and outside quiet hours.
+
+Both also land in the Alerts tab. To check delivery, use You → Send a test notification, then look at `/v1/health` →
+`data.push`. It shows the devices registered and how the last week's alerts were delivered, and `errors_7d` gives the
+reason for failed pushes. For example, `not_configured` means the worker is missing the APNs variables, and
+`400 BadDeviceToken` means the wrong APNs environment.
+
 ## Automatic trips
 Off until the user turns it on (You → Automatic trips, or the one-time card on Today). The app then asks for
 location "Always" and has iOS watch a 150 m area around Home and Work (region monitoring: low power, and iOS wakes the

@@ -21,6 +21,7 @@ import httpx
 
 log = logging.getLogger("paxen.apns")
 PREFIX = "apns:"
+last_error: str | None = None  # why the last push in this process failed, for the alert's record (notify.deliver)
 _jwt: tuple[float, str] | None = None
 _client: httpx.Client | None = None
 
@@ -55,9 +56,11 @@ def _token() -> str:
 
 def send(push_token: str, title: str, body: str, data: dict | None = None) -> str:
     """'sent', 'gone' (the app was deleted or the token is no longer valid: forget it) or 'failed'."""
-    global _client
+    global _client, last_error
+    last_error = None
     if not configured():
         log.warning("APNs isn't configured (APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY): push not sent")
+        last_error = "not_configured"
         return "failed"
     device = push_token.removeprefix(PREFIX)
     host = os.getenv("APNS_HOST", "api.push.apple.com")
@@ -69,10 +72,15 @@ def send(push_token: str, title: str, body: str, data: dict | None = None) -> st
             "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": str(int(time.time()) + 1800)})
     except Exception as e:  # never let a push failure break monitoring
         log.warning("APNs push failed: %s", type(e).__name__)
+        last_error = type(e).__name__
         return "failed"
     if r.status_code == 200:
         return "sent"
-    reason = (r.json() if r.content else {}).get("reason", "")
+    try:
+        reason = (r.json() if r.content else {}).get("reason", "")
+    except ValueError:
+        reason = ""
+    last_error = f"{r.status_code} {reason}".strip()
     if r.status_code == 410 or reason in ("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"):
         return "gone"
     log.warning("APNs push failed (%s %s)", r.status_code, reason)
