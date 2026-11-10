@@ -457,6 +457,9 @@ def data_stats(s: Session, now: datetime, source: str) -> dict:
     rows = s.execute(select(ObservedArrival.method, func.count()).where(
         ObservedArrival.source == source, ObservedArrival.arrived_at >= since).group_by(ObservedArrival.method)).all()
     out: dict = {"arrivals_24h": {m: n for m, n in sorted(rows)}}
+    from .fullness import calibration
+
+    out["boarding_reports"] = calibration(s)  # how the train fullness estimate compares with what riders say
     if pg:
         size = lambda sql: round(float(s.scalar(text(sql)) or 0) / 1e6)  # noqa: E731
         out["db_mb"] = size("SELECT pg_database_size(current_database())")

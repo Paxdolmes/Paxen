@@ -19,6 +19,7 @@ journey is going wrong, and recommend a better decision before they lose time.* 
 | Outcome learning | trips store the forecast made at departure, so insights report forecast error and interval hit-rate |
 | Smart alerts (§2, §7) | `engine.maybe_alert`: only inside the commute window, outside quiet hours, when the usual route is ≥N min slower **and** an alternative is ≥M min better with non-low confidence (or the usual route isn't running). Includes a cooldown so the same situation isn't re-sent. |
 | Crowding (§6) | `engine.crowding_estimate`: phase-1 evidence only (time of day + disruption spill-over), always labelled as an estimate |
+| Train fullness | `fullness.py`: how full each of the next trains is likely to be as it leaves your station ("Likely packed" / "Standing room" / "Space likely"), with advice to wait for a clearly emptier train a few minutes behind. NUMBAT typical load × the live gap ahead of the train × damped live busyness at this station and the two before it, against approximate train capacity. Always an estimate; answers to "Did you get on the first train?" (`boarding_reports`, totals on `/v1/health`) check it |
 | Privacy (§7) | places rounded to ~11 m; no background location (schedule-based); pause monitoring; edit/delete places; clear history; delete account; inferred places need confirmation |
 | Success metrics (§10) | `GET /v1/insights`: provider vs corrected MAE, % within 2/5 min, interval coverage, minutes saved, alerts rated useful, alerts followed |
 

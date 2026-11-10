@@ -135,6 +135,7 @@ class Numbat:
         self.adj: dict[tuple[str, str], list[str]] = defaultdict(list)
         self.out: dict[tuple[str, str, str], list[tuple[Series, Series]]] = defaultdict(list)
         self.inn: dict[tuple[str, str, str], list[tuple[Series, Series]]] = defaultdict(list)
+        self.feeds: dict[tuple[str, str, str], list[tuple[str, Series]]] = defaultdict(list)  # into b, from a
         for key, links in data["links"].items():
             for name, (d, freq, load) in links.items():
                 a, b = name.split(">")
@@ -143,6 +144,7 @@ class Numbat:
                 self.adj[(key, a)].append(b)
                 self.out[(key, a, d)].append((f, l))
                 self.inn[(key, b, d)].append((f, l))
+                self.feeds[(key, b, d)].append((a, f))
         self.platforms: dict[tuple[str, str, str], tuple[Series, Series]] = {}
         for key, plats in data["platforms"].items():
             for name, (board, alight) in plats.items():
@@ -237,6 +239,30 @@ class Numbat:
                 return best
         return None
 
+    def upstream(self, line_id: str | None, stop_id: str | None, bound: str | None, when: datetime,
+                 n: int = 2) -> list[str]:
+        """NaPTAN ids of the n stations a train calls at before this one, in that direction (nearest first).
+        At a junction the branch most trains come from is followed. Empty when the direction can't be told."""
+        key = self.key_of(line_id)
+        code = self.code_of(key, stop_id) if key else None
+        d = self.direction(key, code, bound) if code else None
+        if not d:
+            return []
+        dt, slot = service_slot(when)
+        naptans: dict[str, list[str]] = defaultdict(list)
+        for naptan, c in self.stations.get(key, {}).items():
+            naptans[c].append(naptan)
+        out, seen, cur = [], {code}, code
+        for _ in range(n):
+            feeds = [(f.window(dt, slot), a) for a, f in self.feeds.get((key, cur, d), ()) if a not in seen]
+            if not feeds:
+                break
+            cur = max(feeds)[1]
+            seen.add(cur)
+            if naptans.get(cur):
+                out.append(sorted(naptans[cur])[0])
+        return out
+
     def stop_context(self, line_id: str | None, stop_id: str | None, bound: str | None,
                      when: datetime) -> dict | None:
         """Typical service and demand where a train is arriving, at the time it is due:
@@ -261,17 +287,22 @@ class Numbat:
             if tph <= 0:
                 continue
             load = sum(l.window(dt, slot) for _, l in self.inn.get((key, code, x), ()))
+            leaving = sum(l.window(dt, slot) for _, l in self.out.get((key, code, x), ()))
             plat = self.platforms.get((key, code, x))
             act = (plat[0].window(dt, slot) + plat[1].window(dt, slot)) if plat else None
-            rows.append((tph, act, load / inn if inn > 0 else None))
+            rows.append((tph, act, load / inn if inn > 0 else None, leaving / out if out > 0 else None))
         if not rows:
             return None
         tph = sum(r[0] for r in rows) / len(rows)
         acts = [r[1] / r[0] for r in rows if r[1] is not None]
         loads = [r[2] for r in rows if r[2] is not None]
+        departs = [r[3] for r in rows if r[3] is not None]
         return {"sched_headway_s": round(3600.0 / tph, 1),
                 "activity_per_train": round(sum(acts) / len(acts), 2) if acts else None,
                 "load_per_train": round(sum(loads) / len(loads), 1) if loads else None,
+                # passengers on board as trains pull out (after this stop's alighters and boarders): how full the
+                # train you'd squeeze onto is. Not a model feature; train fullness uses it.
+                "depart_load_per_train": round(sum(departs) / len(departs), 1) if departs else None,
                 "directional": d is not None}
 
 

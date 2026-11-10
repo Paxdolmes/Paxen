@@ -86,6 +86,40 @@ export interface Disruption {
   reason: string | null
 }
 
+// How full a train is likely to be as it leaves your station (backend paxen/fullness.py). An estimate from TfL's
+// typical loads, the live gap ahead of the train and live station busyness, never a passenger count.
+export type FullnessLevel = 'packed' | 'standing' | 'space'
+
+export interface TrainFullness {
+  level: FullnessLevel
+  label: string // "Likely packed", "Standing room", "Space likely", "Likely packed, may not fit"
+  share: number // estimated share of capacity (seats + standing at ~4 per m²)
+  typical_share: number // the same train with a usual gap, on a usual day
+  gap_min: number | null // minutes behind the train ahead, when known
+  headway_min: number | null // scheduled minutes between trains
+  directional: boolean
+}
+
+export interface UpcomingTrain {
+  in_min: number // minutes after you reach the platform
+  at: string // ISO time the train is expected
+  at_local: string // "08:04"
+  fullness: TrainFullness | null
+}
+
+export interface BoardingFullness {
+  line_name: string | null
+  stop: string // the station you board at
+  live: boolean // false: what's usual at this time (more than ~20 min ahead, or no countdown)
+  level: FullnessLevel
+  label: string
+  train_at: string | null
+  trains: UpcomingTrain[]
+  catch_index: number | null // which of trains you'd catch
+  advice: string | null // "The 08:04 is likely packed (7-minute gap ahead of it). The 08:06 should have space, ..."
+  basis: string
+}
+
 export interface RouteOption {
   id: string // route signature; pass back to set usual route / log a trip
   summary: string // "Weaver line → Central"
@@ -105,6 +139,7 @@ export interface RouteOption {
   on_time_chance: number // 0–1: chance of arriving within 5 min of normal
   reliability: { pct: number; n: number; label: string } | null // from the user's own past trips
   crowding: { level: 'quiet' | 'typical' | 'busy' | 'busier' | 'very_busy' | 'n/a'; label: string; basis: string | null }
+  fullness?: BoardingFullness | null // how full the first train is likely to be
   disruptions: Disruption[]
   live_data: boolean
   disruption_risk?: number | null // chance a new disruption starts on one of its (good) Tube lines during the trip, from TfL status history
@@ -250,7 +285,9 @@ export interface LiveTrip {
   eta_range?: [string, string]
   confidence?: Confidence
   next_departure?: { line_name: string | null; line_id: string; stop: string; direction: string | null;
-                     wait_min: number; departures_min: number[]; live: boolean; leg_index: number } | null
+                     wait_min: number; departures_min: number[]; live: boolean; leg_index: number;
+                     stop_id?: string | null; trains?: UpcomingTrain[]; catch_index?: number | null;
+                     fullness?: BoardingFullness | null } | null
   disruptions?: Disruption[]
   // ended
   duration_min?: number | null

@@ -19,11 +19,13 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import disruptions as clearance
+from . import fullness as crowd
 from . import numbat
 from .db import Alert, Commute, LineStatusSnapshot, Trip, User
 from .domain import (
@@ -78,6 +80,8 @@ class NetworkContext:
     model: CorrectionModel
     feed_fresh: bool = True
     disrupted_since: dict[str, datetime] = field(default_factory=dict)  # line -> when its disruption began
+    # when the train ahead was last seen at a platform (paxen.fullness.last_seen_lookup); None: not known
+    last_seen: Callable | None = None
     _arrivals: dict[str, list[Arrival] | None] = field(default_factory=dict)
 
     def chance_still_on(self, line_id: str | None, category: str, when: datetime) -> float:
@@ -147,6 +151,9 @@ class LegForecast:
     # trains per hour, from NUMBAT) or "typical" (a flat guess for the mode, when nothing better is known)
     wait_basis: str = "typical"
     transfer_min: float = 0.0  # walking to this leg's platform when changing trains within a station
+    # the next trains with their estimated fullness (first leg only): [{in_min, at, at_local, fullness}]
+    trains: list[dict] = field(default_factory=list)
+    catch_index: int | None = None  # which of `trains` you'd catch
 
 
 @dataclass
@@ -168,6 +175,7 @@ class JourneyForecast:
     score: float = 0.0
     # chance a new disruption starts on one of the route's (currently good) Tube lines while you're on it
     disruption_risk: float | None = None
+    fullness: dict | None = None  # how full the train you'd board is likely to be (paxen.fullness)
 
     @property
     def signature(self) -> str:
@@ -263,6 +271,9 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     live_any, support, partial = False, 0, False
     band = hour_band(depart_at)
     no_new: float | None = None  # chance no new disruption starts on any Tube leg, from TfL's status history
+    first_transit, board, typical = True, None, None  # how full the first train is likely to be
+    trains: list[dict] = []
+    catch: int | None = None
     for i, leg in enumerate(j.legs):
         before = j.legs[i - 1] if i else None
         if not leg.is_transit:
@@ -316,11 +327,13 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
                     if a.terminates_here:
                         when += timedelta(seconds=TERMINUS_TURNAROUND_S)
-                    cands.append((when, p))
+                    cands.append((when, p, a))
                 cands.sort(key=lambda c: c[0])
-                upcoming = [round((w - board_at).total_seconds() / 60, 1) for w, _ in cands
+                upcoming = [round((w - board_at).total_seconds() / 60, 1) for w, *_ in cands
                             if w >= board_at][:3]
-                for when, p in cands:
+                if first_transit and cands:
+                    trains, catch = boarding_trains(leg, ctx, cands, board_at)
+                for when, p, _a in cands:
                     if when >= board_at + timedelta(seconds=20):
                         wait = (when - board_at).total_seconds() / 60
                         wait_sd = max(0.3, (p["q90_s"] - p["q10_s"]) / 2.56 / 60)
@@ -341,9 +354,15 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                 no_new = (1.0 if no_new is None else no_new) * (1 - r)
         t += wait + ride
         var += wait_sd ** 2 + ride_sd ** 2 + p_on * (1 - p_on) * extra ** 2
+        if first_transit:
+            if not trains:  # not live yet (or no countdown): what's usual for this time and direction
+                typical = crowd.train_fullness(leg.line_id, leg.from_stop_id, bound_of(leg.direction), board_at)
+            board = crowd.summary(leg.line_name, leg.from_name, trains, catch if catch is not None else 0, typical)
+            first_transit = False
         legs.append(LegForecast(leg.mode, leg.line_id, leg.line_name, leg.from_name, leg.to_name, leg.direction,
                                 round(wait, 1), round(ride, 1), round(math.sqrt(wait_sd ** 2 + ride_sd ** 2), 2),
-                                live, cat, upcoming, basis, change))
+                                live, cat, upcoming, basis, change, trains, catch))
+        trains, catch = [], None
     sd = math.sqrt(var)
     p50 = t
     p10, p90 = max(p50 - 1.28 * sd, p50 * 0.85), p50 + 1.28 * sd
@@ -361,7 +380,34 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
         confidence=conf if feasible else "low", legs=legs, on_time_chance=round(on_time, 2) if feasible else 0.0,
         disruptions=list(disruptions.values()), crowding=crowding_estimate(j, ctx, depart_at), live_data=live_any,
         model_support=support, disruption_risk=round(1 - no_new, 3) if no_new is not None else None,
+        fullness=board,
     )
+
+
+def boarding_trains(leg, ctx: NetworkContext, cands: list[tuple], board_at: datetime) -> tuple[list[dict], int | None]:
+    """The next few trains at the boarding stop with how full each is likely to be (paxen.fullness), and which of
+    them you'd catch. cands: (expected time, model output, Arrival), sorted by time."""
+    bound = next((bound_of(a.platform) for *_, a in cands if bound_of(a.platform)), None)
+    live_ratio = None
+    if (board_at - ctx.now) <= timedelta(minutes=20):
+        live_ratio = crowd.live_busyness(ctx.provider, leg.line_id, leg.from_stop_id, bound, board_at)
+    trains: list[dict] = []
+    catch = None
+    for k, (when, _, a) in enumerate(cands):
+        if when < board_at:
+            continue  # gone before you get there, but it is still the train ahead of the next one
+        if len(trains) >= 4:
+            break
+        prev = cands[k - 1][0] if k else None
+        if prev is None and ctx.last_seen:
+            prev = ctx.last_seen(a.stop_id, a.line_id, {d for d in (a.direction, bound_of(a.platform)) if d}, when)
+        gap = (when - prev).total_seconds() if prev else None
+        f = crowd.train_fullness(leg.line_id, leg.from_stop_id, bound_of(a.platform) or bound, when, gap, live_ratio)
+        if catch is None and when >= board_at + timedelta(seconds=20):
+            catch = len(trains)
+        trains.append({"in_min": round((when - board_at).total_seconds() / 60, 1), "at": when.isoformat(),
+                       "at_local": crowd.hhmm(when), "fullness": f})
+    return trains, catch
 
 
 CROWD_LEVELS = ["quiet", "typical", "busy", "busier", "very_busy"]
@@ -622,7 +668,8 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     depart_at = depart_at or default_depart_at(commute, now)
     statuses = current_statuses(provider, now)
     ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name), feed_fresh,
-                         disruption_starts(s, provider.name, statuses, now))
+                         disruption_starts(s, provider.name, statuses, now),
+                         last_seen=crowd.last_seen_lookup(s, provider.name, now))
     o, d = commute.origin, commute.dest
     try:
         journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)

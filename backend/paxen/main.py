@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import serialize as ser
 from .config import settings
-from .db import Alert, Commute, Place, SessionLocal, Trip, User, init_db
+from .db import Alert, BoardingReport, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
 from .engine import (
     clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
@@ -199,6 +199,19 @@ class TripEventIn(BaseModel):
     at: datetime | None = None
 
 
+class BoardingIn(BaseModel):
+    """"Did you get on the first train?" with what the app showed for that train (paxen.fullness)."""
+    trip_id: str | None = Field(default=None, max_length=32)
+    line_id: str = Field(max_length=40)
+    stop_id: str = Field(max_length=40)
+    train_at: datetime | None = None
+    level: Literal["packed", "standing", "space"] | None = None
+    share: float | None = Field(default=None, ge=0, le=5)
+    typical_share: float | None = Field(default=None, ge=0, le=5)
+    gap_min: float | None = Field(default=None, ge=0, le=120)
+    got_on: bool
+
+
 class TripIn(BaseModel):
     commute_id: str | None = None
     signature: str | None = None
@@ -345,7 +358,7 @@ def patch_me(body: MePatch, u: User = Depends(current_user), s: Session = Depend
 
 @app.delete("/v1/me", status_code=204)
 def delete_me(u: User = Depends(current_user), s: Session = Depends(db)):
-    for model in (Trip, Alert):
+    for model in (Trip, Alert, BoardingReport):
         s.query(model).filter(model.user_id == u.id).delete()
     s.delete(s.merge(u))
     s.commit()
@@ -356,6 +369,7 @@ def clear_history(u: User = Depends(current_user), s: Session = Depends(db)):
     """Clear journey history and alerts; learned usual routes are reset too."""
     trips = s.query(Trip).filter(Trip.user_id == u.id).delete()
     alerts = s.query(Alert).filter(Alert.user_id == u.id).delete()
+    s.query(BoardingReport).filter(BoardingReport.user_id == u.id).delete()
     for c in s.scalars(select(Commute).where(Commute.user_id == u.id)):
         c.usual_signature = c.usual_summary = c.usual_nominal_min = None
     s.commit()
@@ -696,6 +710,28 @@ def trip_event(body: TripEventIn, u: User = Depends(current_user), s: Session = 
     if t - at > timedelta(hours=6):
         return {"action": "ignored", "reason": "too old"}
     return handle(s, u, place, body.event, at, lambda c, when: _eval_dict(s, c, when, depart_at=when))
+
+
+@app.post("/v1/boarding")
+def boarding_report(body: BoardingIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    """One tap after boarding: did you get on the first train? Checks the train fullness estimate. One answer per
+    trip and station: answering again changes it."""
+    if body.trip_id:
+        _own(s, Trip, body.trip_id, u)
+    r = None
+    if body.trip_id:
+        r = s.scalar(select(BoardingReport).where(BoardingReport.user_id == u.id,
+                                                  BoardingReport.trip_id == body.trip_id,
+                                                  BoardingReport.stop_id == body.stop_id))
+    if r is None:
+        r = BoardingReport(user_id=u.id, trip_id=body.trip_id, stop_id=body.stop_id, line_id=body.line_id,
+                           got_on=body.got_on)
+        s.add(r)
+    r.line_id, r.got_on, r.level, r.share = body.line_id, body.got_on, body.level, body.share
+    r.typical_share, r.gap_min = body.typical_share, body.gap_min
+    r.train_at = naive_utc(aware(body.train_at)) if body.train_at else None
+    s.commit()
+    return {"id": r.id, "got_on": r.got_on}
 
 
 @app.post("/v1/trips/{trip_id}/live")
