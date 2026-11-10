@@ -194,7 +194,7 @@ export default function LiveTripScreen() {
           <X size={20} color={p.text} />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text variant="caption" tone="brand" style={{ fontWeight: '700' }}>
+          <Text variant="caption" tone="accent" style={{ fontWeight: '700' }}>
             LIVE TRIP
           </Text>
           <Text variant="headline" numberOfLines={1}>
@@ -236,7 +236,7 @@ export default function LiveTripScreen() {
                 onPress={() => setFollow((f) => !f)}
                 style={[{ position: 'absolute', bottom: 12, right: 12, width: 44, height: 44, borderRadius: 22, backgroundColor: p.surface, alignItems: 'center', justifyContent: 'center' }, shadow]}
               >
-                {follow ? <LocateFixed size={20} color={p.brand} /> : <Crosshair size={20} color={p.text} />}
+                {follow ? <LocateFixed size={20} color={p.accent} /> : <Crosshair size={20} color={p.text} />}
               </Pressable>
             )}
           </View>

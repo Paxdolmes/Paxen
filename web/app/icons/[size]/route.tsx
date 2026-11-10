@@ -18,13 +18,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
   const { size: raw } = await params
   const size = ALLOWED.has(Number(raw)) ? Number(raw) : 192
   const { border: silver, accent: crimson, text: ink, surface: outline } = palettes.light
-  // A white keyline (as on the crest) lets the ink "P" read on both the silver field and the crimson pale.
-  const k = Math.max(1, Math.round(size * 0.014))
-  const keyline = [
-    [k, 0], [-k, 0], [0, k], [0, -k], [k, k], [-k, -k], [k, -k], [-k, k],
-  ]
-    .map(([x, y]) => `${x}px ${y}px 0 ${outline}`)
-    .join(', ')
+  // A white keyline (as on the crest) lets the ink "P" read on both the silver field and the crimson pale: a
+  // white-stroked "P" underneath, the ink "P" on top. (One centred stroke; offset text-shadows render lopsided.)
+  const k = Math.max(1, Math.round(size * 0.012))
+  const letter = {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontFamily: 'Cinzel',
+    fontWeight: 700,
+    fontSize: size * 0.62,
+    lineHeight: 1,
+    paddingTop: size * 0.04,
+    paddingLeft: size * 0.03,
+  }
 
   return new ImageResponse(
     (
@@ -49,20 +61,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
             background: crimson,
           }}
         />
-        <span
-          style={{
-            fontFamily: 'Cinzel',
-            fontWeight: 700,
-            fontSize: size * 0.62,
-            lineHeight: 1,
-            color: ink,
-            textShadow: keyline,
-            marginTop: size * 0.04,
-            marginLeft: size * 0.03,
-          }}
-        >
-          P
-        </span>
+        <div style={{ ...letter, color: outline, WebkitTextStroke: `${k * 2}px ${outline}` }}>P</div>
+        <div style={{ ...letter, color: ink }}>P</div>
       </div>
     ),
     {

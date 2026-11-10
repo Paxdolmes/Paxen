@@ -18,7 +18,7 @@ export default function TabsLayout() {
   if (token === undefined || (token && !dashboard && !error)) {
     return (
       <View style={{ flex: 1, backgroundColor: p.canvas, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={p.brand} />
+        <ActivityIndicator color={p.accent} />
       </View>
     )
   }
@@ -35,7 +35,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: p.brand,
+        tabBarActiveTintColor: p.accent,
         tabBarInactiveTintColor: p.textTertiary,
         tabBarStyle: { backgroundColor: p.surface, borderTopColor: p.border },
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },

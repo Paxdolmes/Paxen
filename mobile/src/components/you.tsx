@@ -590,7 +590,7 @@ function LeadChart({ byLead }: { byLead: NonNullable<Insights['model']['by_lead'
         <Text variant="subhead">Average error by how far ahead</Text>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           {legend(p.borderStrong, 'Countdown')}
-          {legend(p.brand, 'Paxen')}
+          {legend(p.accent, 'Paxen')}
         </View>
       </View>
       {rows.map((r) => (
@@ -602,7 +602,7 @@ function LeadChart({ byLead }: { byLead: NonNullable<Insights['model']['by_lead'
             {(
               [
                 ['Countdown', r.provider.mae_s, p.borderStrong],
-                ['Paxen', r.corrected.mae_s, p.brand],
+                ['Paxen', r.corrected.mae_s, p.accent],
               ] as const
             ).map(([name, v, color]) =>
               v == null ? null : (

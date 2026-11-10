@@ -8,6 +8,9 @@ import { Sheet } from './sheet'
 import { Text, textStyle } from './text'
 import { Button } from './ui'
 
+// react-native-web colours the "on" thumb teal unless told otherwise (iOS keeps the white thumbColor).
+const WEB_THUMB = { activeThumbColor: '#FFFFFF' } as object
+
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   const p = usePalette()
   return (
@@ -16,9 +19,10 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       value={checked}
       onValueChange={onChange}
       disabled={disabled}
-      trackColor={{ true: p.brand, false: p.borderStrong }}
+      trackColor={{ true: p.accent, false: p.borderStrong }}
       thumbColor="#FFFFFF"
       ios_backgroundColor={p.borderStrong}
+      {...WEB_THUMB}
     />
   )
 }
@@ -199,7 +203,7 @@ export function SelectField<T extends string>({ label, value, options, onChange 
                 minHeight: 52,
                 borderRadius: radii.md,
                 borderWidth: 1,
-                borderColor: sel ? p.brand : p.border,
+                borderColor: sel ? p.accent : p.border,
                 backgroundColor: sel ? p.brandSoft : p.surface,
                 paddingHorizontal: 16,
                 flexDirection: 'row',
@@ -210,7 +214,7 @@ export function SelectField<T extends string>({ label, value, options, onChange 
               <Text variant="callout" color={sel ? p.onBrandSoft : p.text} style={{ fontWeight: '600' }}>
                 {o.label}
               </Text>
-              {sel && <Check size={20} color={p.brand} />}
+              {sel && <Check size={20} color={p.accent} />}
             </Pressable>
           )
         })}
