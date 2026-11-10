@@ -31,7 +31,7 @@ export function TabBar({ active, unread, onSelect }: { active: Tab; unread: numb
                 aria-current={selected ? 'page' : undefined}
                 className={cn(
                   'flex flex-1 flex-col items-center justify-center gap-1 transition-colors',
-                  selected ? 'text-px-brand' : 'text-px-text-tertiary hover:text-px-text-secondary',
+                  selected ? 'text-px-accent' : 'text-px-text-tertiary hover:text-px-text-secondary',
                 )}
                 style={{ ...textStyle('caption'), fontWeight: selected ? 700 : 500 }}
               >

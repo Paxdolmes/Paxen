@@ -26,7 +26,7 @@ export function RangeBar({
   range: [string, string]
   median: string
   axis: TimeAxis
-  tone?: 'brand' | 'muted' | 'attention'
+  tone?: 'brand' | 'accent' | 'muted' | 'attention'
 }) {
   const left = pos(new Date(range[0]).getTime(), axis)
   const right = pos(new Date(range[1]).getTime(), axis)
@@ -41,6 +41,7 @@ export function RangeBar({
         className={cn(
           'absolute inset-y-0 rounded-full',
           tone === 'brand' && 'bg-px-brand/35',
+          tone === 'accent' && 'bg-px-accent/35',
           tone === 'muted' && 'bg-px-border-strong',
           tone === 'attention' && 'bg-px-attention/35',
         )}
@@ -50,6 +51,7 @@ export function RangeBar({
         className={cn(
           'absolute -inset-y-0.5 w-1 -translate-x-1/2 rounded-full',
           tone === 'brand' && 'bg-px-brand',
+          tone === 'accent' && 'bg-px-accent',
           tone === 'muted' && 'bg-px-text-tertiary',
           tone === 'attention' && 'bg-px-attention',
         )}
