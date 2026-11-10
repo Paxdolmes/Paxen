@@ -52,7 +52,7 @@ export function OptionCard({
   const panelId = `opt-${option.id.replace(/[^a-z0-9]/gi, '')}`
 
   return (
-    <Card className={cn('overflow-hidden', option.is_recommended && 'ring-2 ring-px-brand', off && 'opacity-70')}>
+    <Card className={cn('overflow-hidden', option.is_recommended && 'ring-2 ring-px-accent', off && 'opacity-70')}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -62,7 +62,7 @@ export function OptionCard({
       >
         <div className="flex w-full items-start justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            {option.is_recommended && <Chip tone="brand">Recommended</Chip>}
+            {option.is_recommended && <Chip tone="accent">Recommended</Chip>}
             {option.is_usual && <Chip tone="outline">Usual</Chip>}
             {off && (
               <Chip tone="attention" icon={<Ban className="size-3.5" aria-hidden />}>
@@ -110,7 +110,7 @@ export function OptionCard({
               range={option.arrive_range}
               median={option.arrive_at}
               axis={axis}
-              tone={option.is_recommended ? 'brand' : option.disruptions.length ? 'attention' : 'muted'}
+              tone={option.is_recommended ? 'accent' : option.disruptions.length ? 'attention' : 'muted'}
             />
             <Text variant="caption" tone="secondary" tabular>
               Likely between {fmtTime(option.arrive_range[0])} and {fmtTime(option.arrive_range[1])}

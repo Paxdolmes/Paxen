@@ -11,7 +11,7 @@ const variantClass: Record<Variant, string> = {
   primary: 'bg-px-brand text-px-on-brand hover:bg-px-brand-pressed active:bg-px-brand-pressed',
   secondary: 'bg-px-surface-sunken text-px-text hover:bg-px-border',
   outline: 'border border-px-border-strong bg-px-surface text-px-text hover:bg-px-surface-sunken',
-  ghost: 'bg-transparent text-px-brand hover:bg-px-brand-soft',
+  ghost: 'bg-transparent text-px-accent hover:bg-px-accent-soft hover:text-px-on-accent-soft',
   danger: 'bg-px-attention-soft text-px-on-attention-soft hover:brightness-95',
 }
 

@@ -42,7 +42,7 @@ export function Screen({ title, children, onRefresh, gap = 24 }: { title?: strin
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: 8, paddingBottom: 32, gap }}
-        refreshControl={refresh ? <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={p.brand} /> : undefined}
+        refreshControl={refresh ? <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={p.accent} /> : undefined}
       >
         {title && (
           <Text variant="title1" accessibilityRole="header" style={{ paddingHorizontal: 4 }}>

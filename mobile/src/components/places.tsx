@@ -88,8 +88,8 @@ export function PlaceSearch({
                       gap: 12,
                       borderRadius: radii.md,
                       borderWidth: 1,
-                      borderColor: isSel ? p.brand : p.border,
-                      backgroundColor: isSel ? p.brandSoft : pressed ? p.surfaceSunken : p.surface,
+                      borderColor: isSel ? p.accent : p.border,
+                      backgroundColor: isSel ? p.accentSoft : pressed ? p.surfaceSunken : p.surface,
                       paddingHorizontal: 16,
                       paddingVertical: 10,
                     })}
@@ -104,7 +104,7 @@ export function PlaceSearch({
                         {r.detail ? ` · ${r.detail}` : ''}
                       </Text>
                     </View>
-                    {isSel && <Check size={20} color={p.brand} />}
+                    {isSel && <Check size={20} color={p.accent} />}
                   </Pressable>
                 )
               })}
@@ -114,9 +114,9 @@ export function PlaceSearch({
       )}
 
       {selected && term.length < 2 && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radii.md, borderWidth: 1, borderColor: p.brand, backgroundColor: p.brandSoft, paddingHorizontal: 16, paddingVertical: 12 }}>
-          <Check size={20} color={p.onBrandSoft} />
-          <Text variant="callout" color={p.onBrandSoft} style={{ fontWeight: '600', flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radii.md, borderWidth: 1, borderColor: p.accent, backgroundColor: p.accentSoft, paddingHorizontal: 16, paddingVertical: 12 }}>
+          <Check size={20} color={p.onAccentSoft} />
+          <Text variant="callout" color={p.onAccentSoft} style={{ fontWeight: '600', flex: 1 }}>
             {selected.name}
           </Text>
         </View>
@@ -154,8 +154,8 @@ function StopRow({ stop, selected, onToggle, disabled }: { stop: NearbyStop; sel
         gap: 12,
         borderRadius: radii.md,
         borderWidth: 1,
-        borderColor: selected ? p.brand : p.border,
-        backgroundColor: selected ? p.brandSoft : p.surface,
+        borderColor: selected ? p.accent : p.border,
+        backgroundColor: selected ? p.accentSoft : p.surface,
         paddingHorizontal: 16,
         paddingVertical: 10,
         opacity: off ? 0.5 : 1,
@@ -167,13 +167,13 @@ function StopRow({ stop, selected, onToggle, disabled }: { stop: NearbyStop; sel
           height: 24,
           borderRadius: 6,
           borderWidth: 1,
-          borderColor: selected ? p.brand : p.borderStrong,
-          backgroundColor: selected ? p.brand : p.surface,
+          borderColor: selected ? p.accent : p.borderStrong,
+          backgroundColor: selected ? p.accent : p.surface,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        {selected && <Check size={16} color={p.onBrand} />}
+        {selected && <Check size={16} color={p.onAccent} />}
       </View>
       <Icon size={20} color={p.textSecondary} />
       <View style={{ flex: 1 }}>

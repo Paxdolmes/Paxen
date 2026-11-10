@@ -7,6 +7,7 @@ export type TextTone =
   | 'secondary'
   | 'tertiary'
   | 'brand'
+  | 'accent'
   | 'success'
   | 'watch'
   | 'attention'
@@ -18,6 +19,7 @@ const toneClass: Record<TextTone, string> = {
   secondary: 'text-px-text-secondary',
   tertiary: 'text-px-text-tertiary',
   brand: 'text-px-brand',
+  accent: 'text-px-accent',
   success: 'text-px-success',
   watch: 'text-px-watch',
   attention: 'text-px-attention',

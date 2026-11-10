@@ -19,6 +19,7 @@ import { fmtTime, fmtWait } from '@/shared/format'
 import { modeColors, radii } from '@/shared/paxen-tokens'
 import { CONFIDENCE_PLAIN, stillOnChance, stillOnWords, waitBasisHint } from '@/shared/plain'
 import type { CommuteStatus, Confidence, Disruption, Leg, LineCategory, Mode, RouteOption } from '@/shared/types'
+import { WORDMARK_FONT } from '@/lib/fonts'
 import { alpha, usePalette, type Palette } from '@/lib/theme'
 import { Sheet } from './sheet'
 import { Text } from './text'
@@ -29,12 +30,17 @@ type Icon = ComponentType<{ size?: number; color?: string; strokeWidth?: number 
 /* ---------- wordmark ---------- */
 
 /** Text wordmark: lowercase, tight, with a "signal" dot that reads as on-time. */
+/** Roman serif capitals, widely tracked, with a short crimson rule beneath (the crest's "PAX" lettering). */
 export function Wordmark({ size = 22 }: { size?: number }) {
   const p = usePalette()
   return (
-    <View accessibilityLabel="Paxen" style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-      <Text style={{ fontSize: size, lineHeight: size * 1.1, fontWeight: '800', letterSpacing: -0.055 * size, color: p.brand }}>paxen</Text>
-      <View style={{ width: size * 0.26, height: size * 0.26, borderRadius: size, backgroundColor: p.success, marginLeft: size * 0.08, marginBottom: size * 0.16 }} />
+    <View accessible accessibilityRole="header" accessibilityLabel="Paxen" style={{ alignItems: 'flex-start', gap: size * 0.16 }}>
+      <Text
+        style={{ fontFamily: WORDMARK_FONT, fontSize: size, lineHeight: size * 1.15, letterSpacing: 0.16 * size, marginRight: -0.16 * size, color: p.text }}
+      >
+        PAXEN
+      </Text>
+      <View style={{ width: size * 1.1, height: Math.max(2, Math.round(size * 0.09)), borderRadius: size, backgroundColor: p.accent }} />
     </View>
   )
 }
@@ -269,12 +275,12 @@ export function buildAxis(ranges: [string, string][]): TimeAxis | null {
 
 const pos = (t: number, a: TimeAxis) => ((t - a.min) / Math.max(1, a.max - a.min)) * 100
 
-export function RangeBar({ range, median, axis, tone = 'brand' }: { range: [string, string]; median: string; axis: TimeAxis; tone?: 'brand' | 'muted' | 'attention' }) {
+export function RangeBar({ range, median, axis, tone = 'brand' }: { range: [string, string]; median: string; axis: TimeAxis; tone?: 'brand' | 'accent' | 'muted' | 'attention' }) {
   const p = usePalette()
   const left = pos(new Date(range[0]).getTime(), axis)
   const right = pos(new Date(range[1]).getTime(), axis)
   const mid = pos(new Date(median).getTime(), axis)
-  const solid = tone === 'brand' ? p.brand : tone === 'attention' ? p.attention : p.textTertiary
+  const solid = tone === 'brand' ? p.brand : tone === 'accent' ? p.accent : tone === 'attention' ? p.attention : p.textTertiary
   const soft = tone === 'muted' ? p.borderStrong : alpha(solid, 0.35)
   return (
     <View

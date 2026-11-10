@@ -58,7 +58,7 @@ export function OptionCard({
   const riskText = newDelayRiskWords(option.disruption_risk)
 
   return (
-    <Card style={[{ overflow: 'hidden', opacity: off ? 0.7 : 1 }, option.is_recommended ? { borderWidth: 2, borderColor: p.brand } : null]}>
+    <Card style={[{ overflow: 'hidden', opacity: off ? 0.7 : 1 }, option.is_recommended ? { borderWidth: 2, borderColor: p.accent } : null]}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
@@ -68,7 +68,7 @@ export function OptionCard({
       >
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, flex: 1 }}>
-            {option.is_recommended && <Chip tone="brand">Recommended</Chip>}
+            {option.is_recommended && <Chip tone="accent">Recommended</Chip>}
             {option.is_usual && <Chip tone="outline">Usual</Chip>}
             {off && (
               <Chip tone="attention" icon={(c) => <Ban size={14} color={c} />}>
@@ -108,7 +108,7 @@ export function OptionCard({
 
         {axis && !off && (
           <View style={{ gap: 4 }}>
-            <RangeBar range={option.arrive_range} median={option.arrive_at} axis={axis} tone={option.is_recommended ? 'brand' : option.disruptions.length ? 'attention' : 'muted'} />
+            <RangeBar range={option.arrive_range} median={option.arrive_at} axis={axis} tone={option.is_recommended ? 'accent' : option.disruptions.length ? 'attention' : 'muted'} />
             <Text variant="caption" tone="secondary" tabular>
               Likely between {fmtTime(option.arrive_range[0])} and {fmtTime(option.arrive_range[1])}
             </Text>

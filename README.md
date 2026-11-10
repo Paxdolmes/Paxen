@@ -37,11 +37,13 @@ NEXT_PUBLIC_PAXEN_API_URL=http://localhost:8000 pnpm dev
 ```
 
 Without `NEXT_PUBLIC_PAXEN_API_URL` the web app runs in demo mode on bundled sample data.
-The UI was generated in v0 ([chat](https://v0.app/chat/k0gLb8FzfOs)); design tokens live in `web/lib/paxen-tokens.ts`.
+The UI was generated in v0 ([chat](https://v0.app/chat/k0gLb8FzfOs)) and rebranded there in the colours of a school
+crest: silver, ink and a crimson "pale" ([chat](https://v0.app/chat/ZwYoorZN1Of)). Design tokens live in
+`web/lib/paxen-tokens.ts` (copied into the iPhone app by `npm run sync-shared`).
 
-| Normal day | Disrupted | Compare routes |
+| Today | Compare routes | Dark mode |
 |---|---|---|
-| ![](docs/screenshots/today-normal.png) | ![](docs/screenshots/today-disrupted.png) | ![](docs/screenshots/routes.png) |
+| ![](docs/screenshots/today-normal.png) | ![](docs/screenshots/routes.png) | ![](docs/screenshots/today-dark.png) |
 
 Tests:
 

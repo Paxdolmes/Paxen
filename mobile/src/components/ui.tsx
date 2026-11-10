@@ -71,7 +71,7 @@ const btnColors = (p: Palette, v: BtnVariant) =>
     primary: { bg: p.brand, pressed: p.brandPressed, fg: p.onBrand, border: undefined },
     secondary: { bg: p.surfaceSunken, pressed: p.border, fg: p.text, border: undefined },
     outline: { bg: p.surface, pressed: p.surfaceSunken, fg: p.text, border: p.borderStrong },
-    ghost: { bg: 'transparent', pressed: p.brandSoft, fg: p.brand, border: undefined },
+    ghost: { bg: 'transparent', pressed: p.accentSoft, fg: p.accent, border: undefined },
     danger: { bg: p.attentionSoft, pressed: p.attentionSoft, fg: p.onAttentionSoft, border: undefined },
   })[v]
 
@@ -134,12 +134,13 @@ export function Button({
 
 /* ---------- chips ---------- */
 
-export type ChipTone = 'neutral' | 'brand' | 'success' | 'watch' | 'attention' | 'attentionStrong' | 'outline'
+export type ChipTone = 'neutral' | 'brand' | 'accent' | 'success' | 'watch' | 'attention' | 'attentionStrong' | 'outline'
 
 export const chipColors = (p: Palette, t: ChipTone) =>
   ({
     neutral: { bg: p.surfaceSunken, fg: p.textSecondary },
     brand: { bg: p.brandSoft, fg: p.onBrandSoft },
+    accent: { bg: p.accentSoft, fg: p.onAccentSoft },
     success: { bg: p.successSoft, fg: p.onSuccessSoft },
     watch: { bg: p.watchSoft, fg: p.onWatchSoft },
     attention: { bg: p.attentionSoft, fg: p.onAttentionSoft },
@@ -188,12 +189,12 @@ export function ChoiceChip({ selected, onPress, children }: { selected: boolean;
         borderRadius: radii.pill,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: selected ? p.brand : p.surface,
+        backgroundColor: selected ? p.accent : p.surface,
         borderWidth: selected ? 0 : 1,
         borderColor: p.borderStrong,
       }}
     >
-      <Text variant="subhead" color={selected ? p.onBrand : p.text} style={{ fontWeight: '600' }}>
+      <Text variant="subhead" color={selected ? p.onAccent : p.text} style={{ fontWeight: '600' }}>
         {children}
       </Text>
     </Pressable>
@@ -240,12 +241,12 @@ export function Segmented<T extends string>({
                 paddingHorizontal: 16,
                 borderRadius: radii.pill,
                 borderWidth: 1,
-                borderColor: sel ? p.brand : p.borderStrong,
-                backgroundColor: sel ? p.brand : p.surface,
+                borderColor: sel ? p.accent : p.borderStrong,
+                backgroundColor: sel ? p.accent : p.surface,
                 justifyContent: 'center',
               }}
             >
-              <Text variant="subhead" color={sel ? p.onBrand : p.textSecondary} style={{ fontWeight: '600' }}>
+              <Text variant="subhead" color={sel ? p.onAccent : p.textSecondary} style={{ fontWeight: '600' }}>
                 {o.label}
               </Text>
             </Pressable>
@@ -292,10 +293,10 @@ export function Disclosure({ label, openLabel, children, style }: { label: strin
         onPress={() => setOpen((v) => !v)}
         style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
       >
-        <Text variant="callout" tone="brand" style={{ fontWeight: '600' }}>
+        <Text variant="callout" tone="accent" style={{ fontWeight: '600' }}>
           {open && openLabel ? openLabel : label}
         </Text>
-        <ChevronDown size={20} color={p.brand} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
+        <ChevronDown size={20} color={p.accent} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
       </Pressable>
       {open && <View style={{ gap: 16, paddingTop: 12 }}>{children}</View>}
     </View>
