@@ -2,18 +2,18 @@ import { FlaskConical, Radio } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Chip } from './primitives/chip'
 
-/** Text wordmark: lowercase, tight, with a "signal" dot that reads as on-time. */
+/** Text wordmark: Roman capitals (Cinzel, as on the crest behind the name) and a crest-red dot. */
 export function Wordmark({ className, size = 22 }: { className?: string; size?: number }) {
   return (
     <span
-      className={cn('inline-flex items-baseline text-px-brand', className)}
-      style={{ fontSize: size, lineHeight: 1, fontWeight: 800, letterSpacing: '-0.055em' }}
+      className={cn('inline-flex items-baseline font-serif text-px-brand', className)}
+      style={{ fontSize: size, lineHeight: 1, fontWeight: 700, letterSpacing: '0.06em' }}
     >
-      paxen
+      PAXEN
       <span
         aria-hidden
-        className="ml-[0.08em] inline-block rounded-full bg-px-success"
-        style={{ width: size * 0.26, height: size * 0.26 }}
+        className="ml-[0.1em] inline-block rounded-full bg-px-crest"
+        style={{ width: size * 0.22, height: size * 0.22 }}
       />
     </span>
   )

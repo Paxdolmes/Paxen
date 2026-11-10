@@ -26,6 +26,9 @@ export interface Palette {
   onBrand: string
   brandSoft: string
   onBrandSoft: string
+  /** The crimson of the school crest behind the name. A small detail only (the dot after the wordmark, the app
+   * icon); never a status. Red/orange for delays and disruption is `attention`. */
+  crest: string
   success: string
   successSoft: string
   onSuccessSoft: string
@@ -57,6 +60,7 @@ const light: Palette = {
   onBrand: '#FFFFFF',
   brandSoft: '#DDEBEC',
   onBrandSoft: '#0B4950',
+  crest: '#BE292F',
   success: '#1B7A4B',
   successSoft: '#DEF0E5',
   onSuccessSoft: '#13593A',
@@ -88,6 +92,7 @@ const dark: Palette = {
   onBrand: '#062B2F',
   brandSoft: '#13363A',
   onBrandSoft: '#A3DDE3',
+  crest: '#E25A5F',
   success: '#4FC98C',
   successSoft: '#123324',
   onSuccessSoft: '#93E3B9',

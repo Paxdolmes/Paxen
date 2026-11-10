@@ -7,6 +7,7 @@
 
 @theme inline {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-cinzel), ui-serif, Georgia, serif;
 
   --color-px-canvas: var(--px-canvas);
   --color-px-surface: var(--px-surface);
@@ -23,6 +24,7 @@
   --color-px-on-brand: var(--px-on-brand);
   --color-px-brand-soft: var(--px-brand-soft);
   --color-px-on-brand-soft: var(--px-on-brand-soft);
+  --color-px-crest: var(--px-crest);
   --color-px-success: var(--px-success);
   --color-px-success-soft: var(--px-success-soft);
   --color-px-on-success-soft: var(--px-on-success-soft);

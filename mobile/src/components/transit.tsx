@@ -19,6 +19,7 @@ import { fmtTime, fmtWait } from '@/shared/format'
 import { modeColors, radii } from '@/shared/paxen-tokens'
 import { CONFIDENCE_PLAIN, stillOnChance, stillOnWords, waitBasisHint } from '@/shared/plain'
 import type { CommuteStatus, Confidence, Disruption, Leg, LineCategory, Mode, RouteOption } from '@/shared/types'
+import { WORDMARK_FONT } from '@/lib/fonts'
 import { alpha, usePalette, type Palette } from '@/lib/theme'
 import { Sheet } from './sheet'
 import { Text } from './text'
@@ -29,12 +30,13 @@ type Icon = ComponentType<{ size?: number; color?: string; strokeWidth?: number 
 /* ---------- wordmark ---------- */
 
 /** Text wordmark: lowercase, tight, with a "signal" dot that reads as on-time. */
+/** Roman capitals (Cinzel, as on the crest behind the name) and a crest-red dot. */
 export function Wordmark({ size = 22 }: { size?: number }) {
   const p = usePalette()
   return (
-    <View accessibilityLabel="Paxen" style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-      <Text style={{ fontSize: size, lineHeight: size * 1.1, fontWeight: '800', letterSpacing: -0.055 * size, color: p.brand }}>paxen</Text>
-      <View style={{ width: size * 0.26, height: size * 0.26, borderRadius: size, backgroundColor: p.success, marginLeft: size * 0.08, marginBottom: size * 0.16 }} />
+    <View accessible accessibilityLabel="Paxen" style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+      <Text style={{ fontFamily: WORDMARK_FONT, fontSize: size, lineHeight: size * 1.2, letterSpacing: 0.06 * size, color: p.brand }}>PAXEN</Text>
+      <View style={{ width: size * 0.22, height: size * 0.22, borderRadius: size, backgroundColor: p.crest, marginLeft: size * 0.04, marginBottom: size * 0.26 }} />
     </View>
   )
 }

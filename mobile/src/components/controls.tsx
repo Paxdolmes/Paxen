@@ -8,6 +8,9 @@ import { Sheet } from './sheet'
 import { Text, textStyle } from './text'
 import { Button } from './ui'
 
+// react-native-web colours the "on" thumb teal unless told otherwise (iOS keeps the white thumbColor).
+const WEB_THUMB = { activeThumbColor: '#FFFFFF' } as object
+
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   const p = usePalette()
   return (
@@ -19,6 +22,7 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       trackColor={{ true: p.brand, false: p.borderStrong }}
       thumbColor="#FFFFFF"
       ios_backgroundColor={p.borderStrong}
+      {...WEB_THUMB}
     />
   )
 }

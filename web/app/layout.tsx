@@ -1,10 +1,12 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
-import { Inter } from 'next/font/google'
+import { Cinzel, Inter } from 'next/font/google'
 import { paxenCssVariables, palettes } from '@/lib/paxen-tokens'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+// Roman capitals for the wordmark only (echoing the "PAX" lettering on the crest behind the name).
+const cinzel = Cinzel({ subsets: ['latin'], weight: ['700'], variable: '--font-cinzel', display: 'swap' })
 
 export const metadata: Metadata = {
   title: 'Paxen — know when your normal commute is not normal',
@@ -37,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en-GB" className={`${inter.variable} bg-px-canvas`}>
+    <html lang="en-GB" className={`${inter.variable} ${cinzel.variable} bg-px-canvas`}>
       <head>
         <style id="paxen-tokens" dangerouslySetInnerHTML={{ __html: paxenCssVariables() }} />
       </head>

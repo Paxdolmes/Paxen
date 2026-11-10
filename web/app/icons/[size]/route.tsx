@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { ImageResponse } from 'next/og'
 import { palettes } from '@/lib/paxen-tokens'
 
@@ -9,10 +11,13 @@ export function generateStaticParams() {
   return [...ALLOWED].map((size) => ({ size: String(size) }))
 }
 
+// Cinzel 700, subset to the single glyph "P" (SIL Open Font License), vendored so the build needs no network.
+const cinzel = readFile(join(process.cwd(), 'assets/cinzel-700-p.ttf'))
+
 export async function GET(_req: Request, { params }: { params: Promise<{ size: string }> }) {
   const { size: raw } = await params
   const size = ALLOWED.has(Number(raw)) ? Number(raw) : 192
-  const { brand, onBrand, attention } = palettes.light
+  const { brand, onBrand, crest } = palettes.light
 
   return new ImageResponse(
     (
@@ -25,26 +30,30 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
           justifyContent: 'center',
           background: brand,
           color: onBrand,
+          fontFamily: 'Cinzel',
           fontSize: size * 0.56,
           fontWeight: 700,
-          letterSpacing: -size * 0.03,
           position: 'relative',
         }}
       >
-        <span style={{ marginTop: -size * 0.06 }}>p</span>
+        <span style={{ marginTop: size * 0.02, marginRight: size * 0.06 }}>P</span>
         <div
           style={{
             position: 'absolute',
-            right: size * 0.24,
-            bottom: size * 0.26,
+            right: size * 0.22,
+            bottom: size * 0.3,
             width: size * 0.1,
             height: size * 0.1,
             borderRadius: size,
-            background: attention,
+            background: crest,
           }}
         />
       </div>
     ),
-    { width: size, height: size },
+    {
+      width: size,
+      height: size,
+      fonts: [{ name: 'Cinzel', data: await cinzel, weight: 700, style: 'normal' }],
+    },
   )
 }
