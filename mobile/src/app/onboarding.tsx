@@ -41,7 +41,7 @@ function Welcome({ onStart, busy, error }: { onStart: () => void; busy: boolean;
   const points = [
     { icon: Gauge, text: 'Learns your usual trip to work and back.' },
     { icon: BellRing, text: 'Tells you before you leave if today is different, and what to take instead.' },
-    { icon: ShieldCheck, text: 'No account to create. Location is only used during a live trip, never stored.' },
+    { icon: ShieldCheck, text: 'No account to create, and your location is never stored.' },
   ]
   return (
     <View style={{ flex: 1, gap: 32, paddingTop: 40 }}>

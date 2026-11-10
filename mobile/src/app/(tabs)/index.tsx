@@ -4,7 +4,7 @@ import { greeting } from '@/shared/format'
 import { useDashboard } from '@/lib/hooks'
 import { Screen } from '@/components/screen'
 import { Text } from '@/components/text'
-import { CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
+import { AutoTripsNudge, CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
 import { Button, Card, ErrorState, Section, Skeleton } from '@/components/ui'
 
 export default function TodayScreen() {
@@ -37,6 +37,8 @@ export default function TodayScreen() {
 
       {active && <CommuteHero evaluation={active} onCompare={() => openRoutes(active.commute.id)} />}
       {active && <ConditionsStrip conditions={active.conditions} />}
+
+      <AutoTripsNudge enabled={!!dashboard.user.auto_trips} />
 
       {(dashboard.upcoming?.length ?? 0) > 0 && (
         <Section title="Coming up on your lines">

@@ -5,9 +5,10 @@ import { BellRing, Briefcase, DatabaseZap, History, Home, Pencil, ShieldCheck, T
 import { mutate } from 'swr'
 import { DAY_LABELS, fmtDays, fmtPct, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
 import { radii } from '@/shared/paxen-tokens'
-import type { ChosenStop, Commute, Dashboard, Insights, Place, PlaceSearchResult, Preference, User } from '@/shared/types'
+import type { AutoTripStats, ChosenStop, Commute, Dashboard, Insights, Place, PlaceSearchResult, Preference, User } from '@/shared/types'
 import { api, tokenStore } from '@/lib/api'
 import { activeTripStore, revalidateAll, useInsights, useScenarios } from '@/lib/hooks'
+import { autoTripsPermission, disableAutoTrips, enableAutoTrips, syncGeofences } from '@/lib/autotrips'
 import { disablePush, enablePush, pushPermission, type PushPermission } from '@/lib/push'
 import { usePalette } from '@/lib/theme'
 import { SelectField, SettingRow, Stepper, Switch, TimeField } from './controls'
@@ -47,6 +48,7 @@ function PlaceEditor({ place, onClose }: { place: Place; onClose: () => void }) 
     setError(null)
     try {
       await api.patchPlace(place.id, { ...(sel ? { name: sel.name, lat: sel.lat, lon: sel.lon, source: 'manual' as const } : {}), stops })
+      if (sel && (await autoTripsPermission()) === 'always') await syncGeofences().catch(() => {}) // watch the new address
       await revalidateAll()
       onClose()
     } catch (e) {
@@ -253,6 +255,105 @@ export function CommuteSettings({ commutes }: { commutes: Commute[] }) {
 }
 
 export { DayPicker }
+
+/* ---------- automatic trips ---------- */
+
+const SKIP_WORDS: Record<string, string> = {
+  too_slow: 'a stop on the way',
+  too_fast: 'impossibly quick',
+  returned: 'went back where you started',
+}
+
+export function autoTripSummary(st: AutoTripStats | undefined): string | null {
+  if (!st) return null
+  const parts: string[] = []
+  if (st.recorded) parts.push(`${st.recorded} trip${st.recorded === 1 ? '' : 's'} logged`)
+  const skipped = Object.entries(st.skipped ?? {}).filter(([, n]) => n > 0)
+  if (skipped.length)
+    parts.push(`${skipped.reduce((a, [, n]) => a + n, 0)} left out (${skipped.map(([r, n]) => `${n} ${SKIP_WORDS[r] ?? r}`).join(', ')})`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+export function AutoTripsSection({ user }: { user: User }) {
+  const [on, setOn] = useState(!!user.auto_trips)
+  const [shownOn, setShownOn] = useState(!!user.auto_trips)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const [needsAlways, setNeedsAlways] = useState(false)
+  if (shownOn !== !!user.auto_trips) {
+    setShownOn(!!user.auto_trips)
+    setOn(!!user.auto_trips)
+  }
+
+  useEffect(() => {
+    if (!user.auto_trips) return
+    autoTripsPermission()
+      .then((p) => setNeedsAlways(p !== 'always' && p !== 'unsupported'))
+      .catch(() => {})
+  }, [user.auto_trips])
+
+  const toggle = async (v: boolean) => {
+    setBusy(true)
+    setNote(null)
+    try {
+      if (v) {
+        const res = await enableAutoTrips()
+        setNeedsAlways(res === 'needs-always' || res === 'denied')
+        if (res !== 'on') {
+          setNote(res === 'unsupported' ? 'Automatic trips need the iPhone app.' : null)
+          return
+        }
+      } else {
+        await disableAutoTrips()
+        setNeedsAlways(false)
+      }
+      setOn(v)
+      await mutate(['dashboard'])
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Could not change automatic trips.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const summary = autoTripSummary(user.auto_trip_stats)
+  return (
+    <Section title="Automatic trips">
+      <Card>
+        <SettingRow
+          title="Log my commutes automatically"
+          description="Paxen notices when you leave Home or Work and reach the other, and times the trip. Trips with a stop on the way are left out."
+          control={<Switch checked={on} onChange={toggle} label="Log my commutes automatically" disabled={busy} />}
+        />
+        {(needsAlways || note || (on && summary)) && (
+          <View style={{ gap: 8, paddingHorizontal: 20, paddingBottom: 16, alignItems: 'flex-start' }}>
+            {needsAlways && (
+              <>
+                <Text variant="footnote" tone="secondary">
+                  To notice trips while Paxen is closed, the iPhone needs Location set to Always for Paxen. Only the time you leave or
+                  reach Home and Work is sent, never where you are.
+                </Text>
+                <Button variant="secondary" size="sm" onPress={() => Linking.openSettings()}>
+                  Open Settings
+                </Button>
+              </>
+            )}
+            {note && (
+              <Text variant="footnote" tone="secondary">
+                {note}
+              </Text>
+            )}
+            {on && summary && (
+              <Text variant="footnote" tone="secondary">
+                {summary}
+              </Text>
+            )}
+          </View>
+        )}
+      </Card>
+    </Section>
+  )
+}
 
 /* ---------- alerts ---------- */
 
@@ -613,8 +714,9 @@ export function PrivacySection() {
         <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 20, paddingVertical: 16 }}>
           <ShieldCheck size={20} color={p.success} style={{ marginTop: 2 }} />
           <Text variant="footnote" tone="secondary" style={{ flex: 1 }}>
-            Your account is anonymous — no email or phone number. Paxen stores your places to ~10 m precision and uses your schedule, not
-            background location. Journey history is only used to learn your normal.
+            Your account is anonymous — no email or phone number. Paxen stores your places to ~10 m precision and never stores where you
+            are. With automatic trips on, it only notes when you leave or reach Home and Work. Journey history is only used to learn your
+            normal.
           </Text>
         </View>
         <Divider />

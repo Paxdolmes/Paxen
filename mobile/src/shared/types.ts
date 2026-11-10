@@ -165,6 +165,16 @@ export interface User {
   alert_threshold_min: number // alert when usual is this much slower than normal
   min_gain_min: number // only suggest alternatives at least this much better
   push_enabled: boolean
+  /** Automatic trips: the iPhone reports leaving/reaching Home and Work (times only), the server times the commute. */
+  auto_trips?: boolean
+  auto_trip_stats?: AutoTripStats
+}
+
+export interface AutoTripStats {
+  recorded?: number
+  /** Why trips were left out: too_slow (a stop on the way), too_fast, returned (went back where it started). */
+  skipped?: Record<string, number>
+  last?: { outcome: 'recorded' | 'skipped'; reason: string | null; minutes: number | null; at: string | null }
 }
 
 export interface Dashboard {
@@ -221,7 +231,7 @@ export interface UpcomingDisruption {
 
 export interface LiveTrip {
   trip_id: string
-  status: 'active' | 'arrived' | 'auto_closed' | 'too_fast'
+  status: 'active' | 'arrived' | 'auto_closed' | 'too_fast' | 'too_slow'
   summary: string | null
   started_at: string
   elapsed_min: number

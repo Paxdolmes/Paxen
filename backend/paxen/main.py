@@ -8,7 +8,7 @@ import os
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
@@ -189,6 +189,14 @@ class MePatch(BaseModel):
     monitoring_paused: bool | None = None
     alert_threshold_min: int | None = Field(default=None, ge=2, le=60)
     min_gain_min: int | None = Field(default=None, ge=1, le=60)
+    auto_trips: bool | None = None
+
+
+class TripEventIn(BaseModel):
+    """The phone left or reached one of the user's places (an iOS geofence). No position, just which and when."""
+    place_id: str = Field(max_length=32)
+    event: Literal["enter", "exit"]
+    at: datetime | None = None
 
 
 class TripIn(BaseModel):
@@ -326,6 +334,10 @@ def push_test(u: User = Depends(current_user), s: Session = Depends(db)):
 def patch_me(body: MePatch, u: User = Depends(current_user), s: Session = Depends(db)):
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(u, k, v)
+    if body.auto_trips is False:
+        from .autotrips import forget
+
+        forget(s, u)
     s.add(u)
     s.commit()
     return ser.user(u)
@@ -646,7 +658,10 @@ def start_trip(body: TripIn, u: User = Depends(current_user), s: Session = Depen
              forecast_p90=body.forecast_p90, followed_alert_id=body.followed_alert_id,
              source="manual" if body.arrived_at else "app")
     if body.arrived_at:
+        from .live import finish
+
         _finish(t, aware(body.arrived_at))
+        finish(t, aware(body.arrived_at))  # a time entered by hand gets the same validity check
     elif body.commute_id and body.signature:
         # Live trip: remember the chosen route (stops and shape) so progress can be tracked.
         from .live import plan_from_option
@@ -666,6 +681,21 @@ def start_trip(body: TripIn, u: User = Depends(current_user), s: Session = Depen
     s.add(t)
     s.commit()
     return ser.trip(t)
+
+
+@app.post("/v1/trips/events")
+def trip_event(body: TripEventIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    """Automatic trips (paxen/autotrips.py): the phone left or reached Home or Work."""
+    from .autotrips import handle
+
+    if not u.auto_trips:
+        return {"action": "ignored", "reason": "automatic trips are off"}
+    place = _own(s, Place, body.place_id, u)
+    t = now()
+    at = min(aware(body.at), t) if body.at else t
+    if t - at > timedelta(hours=6):
+        return {"action": "ignored", "reason": "too old"}
+    return handle(s, u, place, body.event, at, lambda c, when: _eval_dict(s, c, when, depart_at=when))
 
 
 @app.post("/v1/trips/{trip_id}/live")
@@ -694,9 +724,12 @@ def _finish(t: Trip, arrived: datetime) -> None:
 
 @app.post("/v1/trips/{trip_id}/arrive")
 def arrive(trip_id: str, body: ArriveIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    from .live import finish
+
     t = _own(s, Trip, trip_id, u)
-    _finish(t, aware(body.arrived_at) if body.arrived_at else now())
-    t.status = "arrived"
+    arrived = aware(body.arrived_at) if body.arrived_at else now()
+    _finish(t, arrived)  # bounds check (within 4 hours)
+    finish(t, arrived)  # validity: a stop on the way or an impossible time isn't learned from
     s.commit()
     return ser.trip(t)
 

@@ -53,3 +53,19 @@ adds each new build to the external **Friends** group, which has a public link, 
 review. The first review takes about a day; later builds are usually approved within hours. Friends install the
 TestFlight app, open the link, and get every new build automatically. Test information and the review contact were
 set on the first run (workflow inputs); the privacy policy is served by the API at `/privacy` (`backend/paxen/privacy.py`).
+
+## Automatic trips
+Off until the user turns it on (You → Automatic trips, or the one-time card on Today). The app then asks for
+location "Always" and has iOS watch a 150 m area around Home and Work (region monitoring: low power, and iOS wakes the
+app briefly in the background even when it's closed; no background-location mode). Each crossing is sent to
+`POST /v1/trips/events` as "left/reached <place> at <time>", never a position. Crossings that can't be sent wait on the
+phone and go with the next one.
+
+The server (`backend/paxen/autotrips.py`) pairs them into trips: leaving a commute's origin starts a pending trip with
+Paxen's forecast for leaving at that moment; reaching the destination within 3 hours finishes it, adding ~2 minutes at
+each end for the walk from the door to the edge of the area. `live.judge()` then keeps or deletes it: slower than the
+slowest likely route by more than max(8 min, 20%) means a stop on the way, and less than half the quickest forecast is
+impossible. Kept trips feed the personal baseline, route reliability and "trips as predicted"; deleted ones are only
+counted (shown in You). Returning to where it started drops the pending trip, and a live trip that's running is ended
+on arrival instead of being doubled. The same check now applies to live and hand-entered trips; invalid trips are
+deleted a day later. None of this touches the network arrival model or its pre-registered evaluation.

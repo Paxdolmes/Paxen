@@ -1,6 +1,6 @@
 """Paxen's privacy policy, served at /privacy. Keep it true to what the code does: if storage changes, change this."""
 
-UPDATED = "6 November 2026"
+UPDATED = "10 November 2026"
 CONTACT = "dan124@live.ie"
 
 PAGE = f"""<!doctype html>
@@ -36,9 +36,14 @@ Paxen can send alerts to your device. It identifies the device for notifications
 </ul>
 
 <h2>Location</h2>
-<p>Paxen does not track you in the background. If you allow location, your phone's position is sent only while you
-have a live trip open, to show your progress and the next departure. It is used for that one response and is
-never stored.</p>
+<p>If you allow location, your phone's position is sent only while you have a live trip open, to show your progress
+and the next departure. It is used for that one response and is never stored.</p>
+<p><strong>Automatic trips</strong> (off unless you turn it on in You): your iPhone watches an area of about 150 m
+around your Home and Work, using its built-in low-power area alerts. When you leave or reach one of them, the app
+sends only which place and the time (for example "left Home at 08:03"), never your position. Paxen uses these to
+time your commute. A trip that took far longer than any route would (say you stopped at the shops) is deleted, not
+kept. Turn it off at any time in You; the iPhone then stops watching the areas. Paxen still never tracks where you
+go in between.</p>
 
 <h2>What Paxen does not do</h2>
 <ul>

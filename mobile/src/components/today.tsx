@@ -1,11 +1,14 @@
-import { Pressable, View } from 'react-native'
+import { useState, useSyncExternalStore } from 'react'
+import { Linking, Platform, Pressable, View } from 'react-native'
 import { router } from 'expo-router'
-import { ArrowRight, CalendarClock, ChevronRight, CloudRain, Map as MapIcon, Navigation, Play, Sparkles, Sun, Wind } from 'lucide-react-native'
+import { ArrowRight, CalendarClock, MapPinned, ChevronRight, CloudRain, Map as MapIcon, Navigation, Play, Sparkles, Sun, Wind } from 'lucide-react-native'
 import { fareLabel, fmtMin, fmtTime } from '@/shared/format'
 import { radii } from '@/shared/paxen-tokens'
 import { crowdingWords, usuallyRange } from '@/shared/plain'
 import type { CommuteEvaluation, Conditions, LineStatus, UpcomingDisruption } from '@/shared/types'
-import { type ActiveTrip, useActiveTrip, useLiveTrip } from '@/lib/hooks'
+import { enableAutoTrips } from '@/lib/autotrips'
+import { type ActiveTrip, revalidateAll, useActiveTrip, useLiveTrip } from '@/lib/hooks'
+import { persisted } from '@/lib/storage'
 import { usePalette } from '@/lib/theme'
 import { useStartTrip } from '@/lib/trip-actions'
 import { Text } from './text'
@@ -377,6 +380,64 @@ export function LinesOnRoutes({ lines }: { lines: LineStatus[] }) {
           </View>
         </View>
       ))}
+    </Card>
+  )
+}
+
+const nudgeStore = persisted('paxen.autoTripsNudge')
+
+/** A one-time invitation to turn on automatic trips (iPhone only). */
+export function AutoTripsNudge({ enabled }: { enabled: boolean }) {
+  const p = usePalette()
+  const dismissed = useSyncExternalStore(nudgeStore.subscribe, nudgeStore.get, nudgeStore.get)
+  const [busy, setBusy] = useState(false)
+  const [needsAlways, setNeedsAlways] = useState(false)
+  if (enabled || Platform.OS === 'web' || dismissed === undefined || dismissed) return null
+  const turnOn = async () => {
+    setBusy(true)
+    try {
+      const res = await enableAutoTrips()
+      if (res === 'on') {
+        nudgeStore.set('done')
+        await revalidateAll()
+      } else setNeedsAlways(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card style={{ padding: 16, gap: 12 }}>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: p.brandSoft, alignItems: 'center', justifyContent: 'center' }}>
+          <MapPinned size={18} color={p.onBrandSoft} />
+        </View>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text variant="headline">Let Paxen log your commutes</Text>
+          <Text variant="footnote" tone="secondary">
+            It notices when you leave and reach Home and Work, so it learns your normal without you pressing start. Only the times
+            are sent, never where you are, and trips with a stop on the way are left out.
+          </Text>
+        </View>
+      </View>
+      {needsAlways ? (
+        <View style={{ gap: 8 }}>
+          <Text variant="footnote" tone="secondary">
+            Set Location to Always for Paxen in Settings, then turn it on in You.
+          </Text>
+          <Button variant="secondary" size="md" onPress={() => Linking.openSettings()}>
+            Open Settings
+          </Button>
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Button size="md" onPress={turnOn} loading={busy}>
+            Turn on
+          </Button>
+          <Button variant="ghost" size="md" onPress={() => nudgeStore.set('dismissed')}>
+            Not now
+          </Button>
+        </View>
+      )}
     </Card>
   )
 }
