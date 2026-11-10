@@ -128,3 +128,15 @@ def test_health_shows_whether_pushes_reach_phones(client):
     push = c.get("/v1/health").json()["data"]["push"]
     assert push["apns_configured"] is False and push["devices"]["iphone"] >= 1
     assert push["errors_7d"]["not_configured"] >= 1 and push["alerts_7d"]["briefing"] >= 1
+
+
+def test_the_worker_reports_whether_it_can_send_iphone_pushes(client, monkeypatch):
+    c, _ = client
+    from paxen import notify, recorder
+
+    monkeypatch.setattr(notify, "_noted", None)
+    with SessionLocal() as s:
+        notify.note_worker(s, MORNING)
+    recorder._DATA_STATS.clear()
+    worker = c.get("/v1/health").json()["data"]["push"]["worker"]
+    assert worker == {"apns_configured": False, "seen_at": MORNING.isoformat()}
