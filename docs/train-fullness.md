@@ -15,7 +15,7 @@ combines three things it does know.
 | Input | Source | What it says |
 |---|---|---|
 | Typical load | TfL NUMBAT 2025 (`numbat.stop_context(...)["depart_load_per_train"]`) | Passengers on board as trains pull out of this station, by direction, day type and quarter hour (averaged over the surrounding hour) |
-| Gap ahead | Live arrivals: the train ahead is in the same countdown. For the next train, the gap comes from when the train ahead was last seen at the platform (Trackernet for the Tube, Darwin for the Overground and Elizabeth line, via `observed_arrivals`) | Passengers build up between trains, so a train after a long gap carries more and the one right behind it fewer |
+| Gap ahead | Live arrivals: the gap behind whichever train is ahead on the same platform, even one to another branch, since it still takes the passengers for the shared stretch. For the first train in the countdown, the gap comes from when the train ahead was last seen at the platform (Trackernet for the Tube, Darwin for the Overground and Elizabeth line, via `observed_arrivals`) | Passengers build up between trains, so a train after a long gap carries more and the one right behind it fewer |
 | Live busyness | TfL's Wi-Fi based station crowding, live vs usual, at this station and the two before it (`numbat.upstream`) | Whether today is busier than a typical day |
 
 `share = typical load × gap factor × live factor ÷ capacity`
