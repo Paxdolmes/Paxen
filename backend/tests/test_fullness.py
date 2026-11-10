@@ -102,6 +102,29 @@ def test_the_journey_forecast_says_which_train_to_wait_for():
 
 
 @needs_data
+def test_the_gap_is_behind_whichever_train_is_ahead_on_the_platform():
+    class Branches:
+        """Upminster trains at 08:04 and 08:09, and a Tower Hill train between them."""
+        name = "tfl"
+
+        def arrivals(self, stop_id, now):
+            def a(vid, mins, dest):
+                t = now + timedelta(minutes=mins)
+                return Arrival(vid, stop_id, "Fulham Broadway", "district", "District", "tube", "inbound", dest, t,
+                               int(mins * 60), now, platform="Eastbound - Platform 1")
+            return SimpleNamespace(items=[a("1", 4, "Upminster"), a("2", 7, "Tower Hill"), a("3", 9, "Upminster")])
+
+    dis = Leg("tube", 6.0, "Fulham Broadway", "Earl's Court", NOW, NOW + timedelta(minutes=6), line_id="district",
+              line_name="District", from_stop_id=FBY, direction="Upminster", stop_ids=[FBY, "940GZZLUECT"])
+    f = forecast_journey(Journey([dis], 6.0, NOW, NOW + timedelta(minutes=6), "tfl"),
+                         NetworkContext(Branches(), NOW, {}, CorrectionModel()), NOW)
+    trains = f.fullness["trains"]
+    assert [t["at_local"] for t in trains] == ["08:04", "08:09"]  # only trains that go your way are listed
+    assert trains[0]["fullness"]["gap_min"] is None  # nothing seen before it, so no gap is assumed
+    assert trains[1]["fullness"]["gap_min"] == 2.0  # behind the Tower Hill train, not 5 min behind the 08:04
+
+
+@needs_data
 def test_without_a_countdown_the_usual_fullness_is_shown():
     class NoLive:
         name = "tfl"

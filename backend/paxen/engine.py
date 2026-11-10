@@ -332,7 +332,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                 upcoming = [round((w - board_at).total_seconds() / 60, 1) for w, *_ in cands
                             if w >= board_at][:3]
                 if first_transit and cands:
-                    trains, catch = boarding_trains(leg, ctx, cands, board_at)
+                    trains, catch = boarding_trains(leg, ctx, cands, board_at, qc)
                 for when, p, _a in cands:
                     if when >= board_at + timedelta(seconds=20):
                         wait = (when - board_at).total_seconds() / 60
@@ -384,9 +384,12 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     )
 
 
-def boarding_trains(leg, ctx: NetworkContext, cands: list[tuple], board_at: datetime) -> tuple[list[dict], int | None]:
+def boarding_trains(leg, ctx: NetworkContext, cands: list[tuple], board_at: datetime,
+                    qc: dict | None = None) -> tuple[list[dict], int | None]:
     """The next few trains at the boarding stop with how full each is likely to be (paxen.fullness), and which of
-    them you'd catch. cands: (expected time, model output, Arrival), sorted by time."""
+    them you'd catch. cands: (expected time, model output, Arrival), sorted by time: only trains that go your way.
+    qc: recorder.queue_context of every arrival there, for the gap behind whichever train is ahead on the platform
+    (a train to another branch in between still takes the passengers waiting for the shared stretch)."""
     bound = next((bound_of(a.platform) for *_, a in cands if bound_of(a.platform)), None)
     live_ratio = None
     if (board_at - ctx.now) <= timedelta(minutes=20):
@@ -398,10 +401,12 @@ def boarding_trains(leg, ctx: NetworkContext, cands: list[tuple], board_at: date
             continue  # gone before you get there, but it is still the train ahead of the next one
         if len(trains) >= 4:
             break
-        prev = cands[k - 1][0] if k else None
-        if prev is None and ctx.last_seen:
-            prev = ctx.last_seen(a.stop_id, a.line_id, {d for d in (a.direction, bound_of(a.platform)) if d}, when)
-        gap = (when - prev).total_seconds() if prev else None
+        gap = qc.get(id(a), (None, None))[1] if qc else None
+        if gap is None:  # first in the queue: the train ahead has left; when was it last at this platform?
+            prev = cands[k - 1][0] if k and not qc else None
+            if prev is None and ctx.last_seen:
+                prev = ctx.last_seen(a.stop_id, a.line_id, {d for d in (a.direction, bound_of(a.platform)) if d}, when)
+            gap = (when - prev).total_seconds() if prev else None
         f = crowd.train_fullness(leg.line_id, leg.from_stop_id, bound_of(a.platform) or bound, when, gap, live_ratio)
         if catch is None and when >= board_at + timedelta(seconds=20):
             catch = len(trains)
