@@ -164,3 +164,22 @@ def test_replay_matches_live_inference(session):
                                            ObservedArrival.arrived_at)).all())
     assert {r for r in replay if r[2] <= end.replace(tzinfo=None) - timedelta(minutes=2)} == \
         {r for r in live if r[2] <= end.replace(tzinfo=None) - timedelta(minutes=2)}
+
+
+def test_operational_records_go_after_a_week_training_data_stays(session):
+    from datetime import timedelta
+
+    from paxen.db import LineStatusSnapshot, Prediction, RawSnapshot
+    from paxen.recorder import prune
+
+    for days in (6, 8):
+        t = (MORNING - timedelta(days=days)).replace(tzinfo=None)
+        session.add(RawSnapshot(source="tfl", endpoint="line_status", polled_at=t, status=200))
+        session.add(LineStatusSnapshot(source="tfl", polled_at=t, line_id="victoria", line_name="Victoria", mode="tube",
+                                       category="good", description="Good Service"))
+        session.add(Prediction(source="tfl", polled_at=t, stop_id="S", line_id="victoria", mode="tube",
+                               vehicle_id="1", expected_arrival=t, tts_s=60))
+    session.commit()
+    prune(session, MORNING, prediction_days=60)
+    assert session.query(RawSnapshot).count() == 1 and session.query(LineStatusSnapshot).count() == 1
+    assert session.query(Prediction).count() == 2  # training data follows its own 60-day retention
