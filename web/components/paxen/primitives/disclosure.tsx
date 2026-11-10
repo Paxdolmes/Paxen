@@ -29,7 +29,7 @@ export function Disclosure({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="-mx-2 flex min-h-11 items-center justify-between gap-3 rounded-px-sm px-2 text-left text-px-accent hover:bg-px-surface-sunken"
+        className="-mx-2 flex min-h-11 items-center justify-between gap-3 rounded-px-sm px-2 text-left text-px-brand hover:bg-px-surface-sunken"
       >
         <Text variant="callout" as="span" tone="inherit" style={{ fontWeight: 600 }}>
           {open && openLabel ? openLabel : label}

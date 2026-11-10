@@ -27,11 +27,9 @@ export interface Palette {
   onBrand: string
   brandSoft: string
   onBrandSoft: string
-  accent: string
-  accentPressed: string
-  onAccent: string
-  accentSoft: string
-  onAccentSoft: string
+  /** The crimson of the school crest behind the name. A small detail only (the dot after the wordmark, the app
+   * icon); never a status. Red/orange for delays and disruption is `attention`. */
+  crest: string
   success: string
   successSoft: string
   onSuccessSoft: string
@@ -47,82 +45,67 @@ export interface Palette {
   overlay: string
 }
 
-/*
- * "Silver, ink and a crimson pale".
- * brand = the primary-action colour (ink in light, bright silver in dark).
- * accent = crimson, used sparingly: wordmark rule, active tab, focus, selection, links, "Recommended", the pale.
- * attention is a burnt orange (not red) so "disrupted" never reads as brand.
- * Every text/background pair is WCAG AA; borderStrong is ≥3:1 on all surfaces (UI boundaries).
- */
 const light: Palette = {
-  canvas: '#ECEDEF',
+  canvas: '#F2F1EE',
   surface: '#FFFFFF',
   surfaceRaised: '#FFFFFF',
-  surfaceSunken: '#E1E3E6',
-  border: '#D3D6DA',
-  borderStrong: '#7A8088',
-  text: '#111214',
-  textSecondary: '#4A4F56',
-  textTertiary: '#5C626A',
-  textInverse: '#F4F5F6',
-  brand: '#16181B',
-  brandPressed: '#2C3036',
+  surfaceSunken: '#E9E7E3',
+  border: '#E2DFDA',
+  borderStrong: '#C9C5BE',
+  text: '#16191C',
+  textSecondary: '#54595F',
+  textTertiary: '#666B71',
+  textInverse: '#F7F7F5',
+  brand: '#0E5A63',
+  brandPressed: '#0A474F',
   onBrand: '#FFFFFF',
-  brandSoft: '#E1E3E6',
-  onBrandSoft: '#1D2024',
-  accent: '#B3262C',
-  accentPressed: '#A72226',
-  onAccent: '#FFFFFF',
-  accentSoft: '#F6E3E4',
-  onAccentSoft: '#8C1C21',
-  success: '#176E3F',
-  successSoft: '#DCEFE3',
-  onSuccessSoft: '#135835',
-  watch: '#8A5900',
-  watchSoft: '#F8EDD2',
-  onWatchSoft: '#674200',
-  attention: '#A84307',
-  attentionStrong: '#8F390A',
+  brandSoft: '#DDEBEC',
+  onBrandSoft: '#0B4950',
+  crest: '#BE292F',
+  success: '#1B7A4B',
+  successSoft: '#DEF0E5',
+  onSuccessSoft: '#13593A',
+  watch: '#9A620A',
+  watchSoft: '#FBEFD6',
+  onWatchSoft: '#6E4504',
+  attention: '#C2410C',
+  attentionStrong: '#9A3412',
   onAttention: '#FFFFFF',
-  attentionSoft: '#FBE6D6',
-  onAttentionSoft: '#863306',
-  focus: '#B3262C',
-  overlay: 'rgba(17, 18, 20, 0.45)',
+  attentionSoft: '#FCE6DB',
+  onAttentionSoft: '#8A2C07',
+  focus: '#0E5A63',
+  overlay: 'rgba(14, 18, 22, 0.42)',
 }
 
 const dark: Palette = {
-  canvas: '#0E0F11',
-  surface: '#181A1D',
-  surfaceRaised: '#22252A',
-  surfaceSunken: '#22252A',
-  border: '#2C3036',
-  borderStrong: '#6E757D',
-  text: '#ECEDEF',
-  textSecondary: '#B4B9BF',
-  textTertiary: '#979DA4',
-  textInverse: '#111214',
-  brand: '#D9DCE0',
-  brandPressed: '#C1C5CB',
-  onBrand: '#111214',
-  brandSoft: '#2A2E34',
-  onBrandSoft: '#DCDFE3',
-  accent: '#F2737A',
-  accentPressed: '#EC5F66',
-  onAccent: '#0E0F11',
-  accentSoft: '#3A1B1E',
-  onAccentSoft: '#FFB8BB',
+  canvas: '#111315',
+  surface: '#1B1E21',
+  surfaceRaised: '#23272B',
+  surfaceSunken: '#262A2E',
+  border: '#2E3337',
+  borderStrong: '#434A50',
+  text: '#F1F2F3',
+  textSecondary: '#AEB4BA',
+  textTertiary: '#949AA1',
+  textInverse: '#16191C',
+  brand: '#5FBCC5',
+  brandPressed: '#4AA6AF',
+  onBrand: '#062B2F',
+  brandSoft: '#13363A',
+  onBrandSoft: '#A3DDE3',
+  crest: '#E25A5F',
   success: '#4FC98C',
-  successSoft: '#11301F',
+  successSoft: '#123324',
   onSuccessSoft: '#93E3B9',
-  watch: '#EFC04F',
-  watchSoft: '#352B0F',
-  onWatchSoft: '#F6D78E',
-  attention: '#FF8F3F',
-  attentionStrong: '#FF7A1F',
-  onAttention: '#1F0D02',
-  attentionSoft: '#3A200C',
-  onAttentionSoft: '#FFC59A',
-  focus: '#F2737A',
+  watch: '#F0B44C',
+  watchSoft: '#382A0E',
+  onWatchSoft: '#F7D08A',
+  attention: '#FF8A5B',
+  attentionStrong: '#FF7444',
+  onAttention: '#2A0E03',
+  attentionSoft: '#3C1D10',
+  onAttentionSoft: '#FFBB9E',
+  focus: '#5FBCC5',
   overlay: 'rgba(0, 0, 0, 0.6)',
 }
 
@@ -217,16 +200,16 @@ export interface ShadowToken {
 export const shadows: Record<ColorScheme, Record<'card' | 'raised' | 'bar', ShadowToken>> = {
   light: {
     card: {
-      css: '0 1px 2px rgba(17, 18, 20, 0.04), 0 6px 20px rgba(17, 18, 20, 0.05)',
-      rn: { shadowColor: '#111214', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+      css: '0 1px 2px rgba(22, 25, 28, 0.04), 0 6px 20px rgba(22, 25, 28, 0.05)',
+      rn: { shadowColor: '#16191C', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
     },
     raised: {
-      css: '0 2px 6px rgba(17, 18, 20, 0.06), 0 16px 40px rgba(17, 18, 20, 0.12)',
-      rn: { shadowColor: '#111214', shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
+      css: '0 2px 6px rgba(22, 25, 28, 0.06), 0 16px 40px rgba(22, 25, 28, 0.12)',
+      rn: { shadowColor: '#16191C', shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 8 },
     },
     bar: {
-      css: '0 -1px 0 rgba(17, 18, 20, 0.06)',
-      rn: { shadowColor: '#111214', shadowOpacity: 0.06, shadowRadius: 0, shadowOffset: { width: 0, height: -1 }, elevation: 0 },
+      css: '0 -1px 0 rgba(22, 25, 28, 0.06)',
+      rn: { shadowColor: '#16191C', shadowOpacity: 0.06, shadowRadius: 0, shadowOffset: { width: 0, height: -1 }, elevation: 0 },
     },
   },
   dark: {

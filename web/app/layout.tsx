@@ -5,8 +5,8 @@ import { paxenCssVariables, palettes } from '@/lib/paxen-tokens'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
-// Roman capitals for the wordmark (and the onboarding welcome headline) only; never data, times or buttons.
-const cinzel = Cinzel({ subsets: ['latin'], weight: ['600', '700'], variable: '--font-cinzel', display: 'swap' })
+// Roman capitals for the wordmark only (echoing the "PAX" lettering on the crest behind the name).
+const cinzel = Cinzel({ subsets: ['latin'], weight: ['700'], variable: '--font-cinzel', display: 'swap' })
 
 export const metadata: Metadata = {
   title: 'Paxen — know when your normal commute is not normal',

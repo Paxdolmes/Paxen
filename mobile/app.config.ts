@@ -28,7 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   web: { bundler: 'metro', output: 'single' },
   plugins: [
     'expo-router',
-    ['expo-splash-screen', { image: './assets/icon.png', imageWidth: 120, backgroundColor: '#ECEDEF', dark: { image: './assets/icon.png', backgroundColor: '#0E0F11' } }],
+    ['expo-splash-screen', { image: './assets/icon.png', imageWidth: 120, backgroundColor: '#F2F1EE', dark: { image: './assets/icon.png', backgroundColor: '#111315' } }],
     ['expo-notifications', { mode: 'production' }],
     [
       'expo-location',

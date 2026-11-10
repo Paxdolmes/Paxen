@@ -7,7 +7,7 @@ const config: CapacitorConfig = {
   webDir: 'out',
   ios: {
     contentInset: 'never', // the web app already lays itself out around the notch and home bar (viewport-fit=cover)
-    backgroundColor: '#ECEDEF', // = palettes.light.canvas (lib/paxen-tokens.ts)
+    backgroundColor: '#F2F1EE',
   },
   plugins: {
     PushNotifications: { presentationOptions: ['banner', 'sound', 'badge'] },

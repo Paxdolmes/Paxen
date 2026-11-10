@@ -44,12 +44,8 @@ export function CommuteHero({ evaluation, onCompare, onLive }: { evaluation: Com
   const slowerBy = delta_min != null && Math.round(delta_min) > 0 ? Math.round(delta_min) : null
   const range = rec ? usuallyRange(rec.duration.p10, rec.duration.p90) : null
 
-  // The "pale": a thin crimson band down the left edge, used only here and in the app icon.
   return (
-    <Card
-      className="relative overflow-hidden before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-1 before:bg-px-accent before:content-['']"
-      aria-labelledby={`hero-${commute.id}`}
-    >
+    <Card className="overflow-hidden" aria-labelledby={`hero-${commute.id}`}>
       <div className={cn('flex flex-col gap-2 px-5 pb-5 pt-4', meta.headerClass)}>
         <div className="flex items-center justify-between gap-3">
           <span className="inline-flex min-w-0 items-center gap-1.5">

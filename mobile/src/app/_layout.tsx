@@ -35,7 +35,7 @@ export default function RootLayout() {
   }, [])
 
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme
-  const theme = { ...base, colors: { ...base.colors, primary: p.accent, background: p.canvas, card: p.surface, text: p.text, border: p.border } }
+  const theme = { ...base, colors: { ...base.colors, primary: p.brand, background: p.canvas, card: p.surface, text: p.text, border: p.border } }
 
   return (
     <SafeAreaProvider>
