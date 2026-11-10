@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { ImageResponse } from 'next/og'
 import { palettes } from '@/lib/paxen-tokens'
 
@@ -9,10 +11,20 @@ export function generateStaticParams() {
   return [...ALLOWED].map((size) => ({ size: String(size) }))
 }
 
+// Cinzel 700, subset to the single glyph "P" (SIL Open Font License), vendored so the build needs no network.
+const cinzel = readFile(join(process.cwd(), 'assets/cinzel-700-p.ttf'))
+
 export async function GET(_req: Request, { params }: { params: Promise<{ size: string }> }) {
   const { size: raw } = await params
   const size = ALLOWED.has(Number(raw)) ? Number(raw) : 192
-  const { brand, onBrand, attention } = palettes.light
+  const { border: silver, accent: crimson, text: ink, surface: outline } = palettes.light
+  // A white keyline (as on the crest) lets the ink "P" read on both the silver field and the crimson pale.
+  const k = Math.max(1, Math.round(size * 0.014))
+  const keyline = [
+    [k, 0], [-k, 0], [0, k], [0, -k], [k, k], [-k, -k], [k, -k], [-k, k],
+  ]
+    .map(([x, y]) => `${x}px ${y}px 0 ${outline}`)
+    .join(', ')
 
   return new ImageResponse(
     (
@@ -23,28 +35,40 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: brand,
-          color: onBrand,
-          fontSize: size * 0.56,
-          fontWeight: 700,
-          letterSpacing: -size * 0.03,
+          background: silver,
           position: 'relative',
         }}
       >
-        <span style={{ marginTop: -size * 0.06 }}>p</span>
         <div
           style={{
             position: 'absolute',
-            right: size * 0.24,
-            bottom: size * 0.26,
-            width: size * 0.1,
-            height: size * 0.1,
-            borderRadius: size,
-            background: attention,
+            top: 0,
+            bottom: 0,
+            left: (size - size * 0.22) / 2,
+            width: size * 0.22,
+            background: crimson,
           }}
         />
+        <span
+          style={{
+            fontFamily: 'Cinzel',
+            fontWeight: 700,
+            fontSize: size * 0.62,
+            lineHeight: 1,
+            color: ink,
+            textShadow: keyline,
+            marginTop: size * 0.04,
+            marginLeft: size * 0.03,
+          }}
+        >
+          P
+        </span>
       </div>
     ),
-    { width: size, height: size },
+    {
+      width: size,
+      height: size,
+      fonts: [{ name: 'Cinzel', data: await cinzel, weight: 700, style: 'normal' }],
+    },
   )
 }

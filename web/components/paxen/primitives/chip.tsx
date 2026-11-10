@@ -2,11 +2,12 @@ import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { textStyle } from './text'
 
-export type ChipTone = 'neutral' | 'brand' | 'success' | 'watch' | 'attention' | 'attentionStrong' | 'outline'
+export type ChipTone = 'neutral' | 'brand' | 'accent' | 'success' | 'watch' | 'attention' | 'attentionStrong' | 'outline'
 
 const toneClass: Record<ChipTone, string> = {
   neutral: 'bg-px-surface-sunken text-px-text-secondary',
   brand: 'bg-px-brand-soft text-px-on-brand-soft',
+  accent: 'bg-px-accent-soft text-px-on-accent-soft',
   success: 'bg-px-success-soft text-px-on-success-soft',
   watch: 'bg-px-watch-soft text-px-on-watch-soft',
   attention: 'bg-px-attention-soft text-px-on-attention-soft',
@@ -51,7 +52,7 @@ export function ChoiceChip({ selected, className, children, style, ...props }: C
       className={cn(
         'inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full px-4 transition-colors',
         selected
-          ? 'bg-px-brand text-px-on-brand'
+          ? 'bg-px-accent text-px-on-accent'
           : 'border border-px-border-strong bg-px-surface text-px-text hover:bg-px-surface-sunken',
         className,
       )}

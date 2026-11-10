@@ -7,6 +7,7 @@
 
 @theme inline {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-cinzel), 'Trajan Pro', ui-serif, Georgia, serif;
 
   --color-px-canvas: var(--px-canvas);
   --color-px-surface: var(--px-surface);
@@ -23,6 +24,11 @@
   --color-px-on-brand: var(--px-on-brand);
   --color-px-brand-soft: var(--px-brand-soft);
   --color-px-on-brand-soft: var(--px-on-brand-soft);
+  --color-px-accent: var(--px-accent);
+  --color-px-accent-pressed: var(--px-accent-pressed);
+  --color-px-on-accent: var(--px-on-accent);
+  --color-px-accent-soft: var(--px-accent-soft);
+  --color-px-on-accent-soft: var(--px-on-accent-soft);
   --color-px-success: var(--px-success);
   --color-px-success-soft: var(--px-success-soft);
   --color-px-on-success-soft: var(--px-on-success-soft);
