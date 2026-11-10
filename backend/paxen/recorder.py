@@ -23,6 +23,7 @@ from .timeutil import aware, naive_utc
 
 log = logging.getLogger("paxen.recorder")
 
+KEEP_OPS_DAYS = 7  # raw_snapshots rows and line_status_snapshots (see prune)
 KEEP_RAW_PAYLOAD_DAYS = 2  # database copies of raw responses; the archive (R2) keeps the originals
 ARRIVAL_COUNTDOWN_MAX_S = 120  # last sighting must be this close to arrival to infer an arrival
 WATCH_TTL = timedelta(days=7)
@@ -52,8 +53,10 @@ def record_statuses(s: Session, provider: Provider, now: datetime) -> dict[str, 
         s.add(RawSnapshot(source=provider.name, endpoint="line_status", polled_at=polled, status=0, error=redact(e)[:500]))
         log.warning("status poll failed: %s",redact(e))
         return {}
+    key = archive_raw(provider.name, "line-status", now, res.raw)  # the archive keeps the original
     s.add(RawSnapshot(source=provider.name, endpoint=res.endpoint, polled_at=polled, status=res.status,
-                      latency_ms=res.latency_ms, item_count=len(res.items), payload=res.raw))
+                      latency_ms=res.latency_ms, item_count=len(res.items), payload=None if key else res.raw,
+                      archive_key=key))
     try:  # the permanent, compact status history (one row per change); never let it stop recording
         from .context import record_status_changes
 
@@ -400,8 +403,8 @@ def record_once(s: Session, provider: Provider, now: datetime, extra_stops: list
 
 
 def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None:
-    """Retention. Predictions, arrivals, line-status snapshots and raw-snapshot rows go after
-    PAXEN_PREDICTION_RETENTION_DAYS (default 60; 0 keeps forever). Raw payloads in the database go after
+    """Retention. Predictions and arrivals go after PAXEN_PREDICTION_RETENTION_DAYS (default 60; 0 keeps forever);
+    poll records and line-status snapshots after KEEP_OPS_DAYS. Raw payloads in the database go after
     KEEP_RAW_PAYLOAD_DAYS; the archive keeps every original, so history can be rebuilt."""
     import os
 
@@ -412,11 +415,15 @@ def prune(s: Session, now: datetime, prediction_days: int | None = None) -> None
         # Arrivals are only useful alongside predictions (kept one extra day so late pairs still match).
         s.query(ObservedArrival).filter(ObservedArrival.arrived_at < old - timedelta(days=1)).delete(
             synchronize_session=False)
-        s.query(LineStatusSnapshot).filter(LineStatusSnapshot.polled_at < old).delete(synchronize_session=False)
-        s.query(RawSnapshot).filter(RawSnapshot.polled_at < old).delete(synchronize_session=False)
+
         from .db import StationCrowding
 
         s.query(StationCrowding).filter(StationCrowding.polled_at < old).delete(synchronize_session=False)
+    # Operational records, never training data: poll metadata (read back 20 minutes by arrival inference) and status
+    # snapshots (read back 24 h; the permanent status history is context_events, and predictions carry the status).
+    ops = naive_utc(now - timedelta(days=KEEP_OPS_DAYS))
+    s.query(LineStatusSnapshot).filter(LineStatusSnapshot.polled_at < ops).delete(synchronize_session=False)
+    s.query(RawSnapshot).filter(RawSnapshot.polled_at < ops).delete(synchronize_session=False)
     cutoff = naive_utc(now - timedelta(days=KEEP_RAW_PAYLOAD_DAYS))
     s.query(RawSnapshot).filter(RawSnapshot.polled_at < cutoff, RawSnapshot.payload.is_not(None)).update(
         {RawSnapshot.payload: None}, synchronize_session=False)
