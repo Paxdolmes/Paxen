@@ -95,6 +95,13 @@ def monitor_tick() -> int:
         except Exception:
             log.exception("closing stale trips failed")
         try:
+            from .notify import note_worker
+
+            note_worker(s, now)  # lets /v1/health show whether this process can send iPhone pushes
+        except Exception:
+            log.exception("worker status not recorded")
+            s.rollback()
+        try:
             from .briefing import send_due
 
             sent += send_due(s, provider, now, fresh, deliver)  # daily briefings at the times users chose

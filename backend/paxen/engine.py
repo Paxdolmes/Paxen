@@ -765,6 +765,10 @@ def set_usual(commute: Commute, j: Journey) -> None:
 
 
 # ------------------------------------------------------------------------- alerts
+MAX_ALERTS_PER_DAY = 3  # per commute, not counting the daily briefing
+ALERT_GAP_MIN = 20  # between alerts for a commute, unless the usual route has just stopped running
+
+
 def maybe_alert(s: Session, ev: CommuteEvaluation, now: datetime, force: bool = False) -> Alert | None:
     """force=True skips the time-window, quiet-hours and cooldown checks (used by the demo 'check now' action)."""
     c, u = ev.commute, ev.commute.user
@@ -786,19 +790,25 @@ def maybe_alert(s: Session, ev: CommuteEvaluation, now: datetime, force: bool = 
         return None
 
     day_start = naive_utc(local(now).replace(hour=0, minute=0, second=0, microsecond=0))
-    prior = s.scalars(select(Alert).where(Alert.commute_id == c.id, Alert.created_at >= day_start)
-                      .order_by(Alert.created_at.desc())).first()
+    today = s.scalars(select(Alert).where(Alert.commute_id == c.id, Alert.created_at >= day_start,
+                                          Alert.kind != "briefing").order_by(Alert.created_at.desc())).all()
     rec_sig = rec.signature if rec else None
-    if not force and prior and prior.kind == kind and prior.recommended_signature == rec_sig and \
-            abs((prior.delta_min or 0) - (ev.delta_min or 0)) < 10:
-        return None  # nothing materially new since the last alert
+    if not force and today:
+        if any(a.kind == kind and a.recommended_signature == rec_sig and
+               abs((a.delta_min or 0) - (ev.delta_min or 0)) < 10 for a in today):
+            return None  # already said today (even if something else was said in between: no flip-flopping)
+        if len(today) >= MAX_ALERTS_PER_DAY:
+            return None  # the rest is on Today and in the Alerts tab
+        escalation = kind == "usual_unavailable" and today[0].kind != "usual_unavailable"
+        if not escalation and naive_utc(now) - today[0].created_at < timedelta(minutes=ALERT_GAP_MIN):
+            return None  # too soon after the last one
     from .briefing import recently_briefed
 
     if not force and recently_briefed(s, c.id, now, rec_sig, ev.delta_min):
         return None  # the daily briefing has just said this
 
     title = ev.headline.upper() if kind != "usual_unavailable" else "YOUR USUAL ROUTE ISN'T RUNNING"
-    alert = Alert(user_id=u.id, commute_id=c.id, kind=kind, title=ev.headline, body=ev.detail,
+    alert = Alert(user_id=u.id, commute_id=c.id, created_at=naive_utc(now), kind=kind, title=ev.headline, body=ev.detail,
                   confidence=rec.confidence if rec else "low", delta_min=ev.delta_min, gain_min=ev.gain_min,
                   recommended_signature=rec_sig,
                   data={"commute_name": c.name, "recommended_summary": rec.journey.summary if rec else None,

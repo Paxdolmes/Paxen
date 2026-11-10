@@ -94,7 +94,8 @@ def _with_disruption(body: str, usual) -> str:
 def make(s: Session, ev: CommuteEvaluation, now: datetime) -> Alert:
     title, body = compose(ev, now)
     rec = ev.recommended
-    alert = Alert(user_id=ev.commute.user_id, commute_id=ev.commute.id, kind=KIND, title=title, body=body,
+    alert = Alert(user_id=ev.commute.user_id, commute_id=ev.commute.id, created_at=naive_utc(now), kind=KIND,
+                  title=title, body=body,
                   confidence=rec.confidence if rec else "low", delta_min=ev.delta_min, gain_min=ev.gain_min,
                   recommended_signature=rec.signature if rec else None,
                   data={"commute_name": ev.commute.name, "push_title": title,

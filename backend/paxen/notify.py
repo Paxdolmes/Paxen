@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections import Counter
 from datetime import datetime, timedelta
@@ -68,10 +69,33 @@ def deliver(user: User, alert: Alert) -> str:
     return alert.delivered
 
 
+WORKER_STATUS = "worker_status"  # an AppSecret row (a small key-value store the API and worker share); not secret
+_noted: datetime | None = None
+
+
+def note_worker(s, now: datetime) -> None:
+    """Worker, each monitor pass (written at most every 10 minutes): whether this process can send iPhone pushes.
+    The API and the worker are separate services with their own settings, and the worker sends the alerts."""
+    global _noted
+    if _noted and now - _noted < timedelta(minutes=10):
+        return
+    from . import apns
+    from .db import AppSecret
+
+    value = json.dumps({"apns_configured": apns.configured(), "seen_at": now.isoformat()})
+    row = s.get(AppSecret, WORKER_STATUS)
+    if row:
+        row.value = value
+    else:
+        s.add(AppSecret(name=WORKER_STATUS, value=value))
+    s.commit()
+    _noted = now
+
+
 def push_stats(s, now: datetime) -> dict:
     """For /v1/health: devices that can get pushes, how the last week's alerts were delivered and why pushes
-    failed (counts only, nothing personal). `apns_configured` is this process's view (the API); a worker without
-    the APNs settings shows up as errors "not_configured"."""
+    failed (counts only, nothing personal). `apns_configured` is the API's view and `worker` the worker's (it sends
+    the alerts and briefings); a push that failed for want of the settings shows as "not_configured"."""
     from sqlalchemy import select
 
     from . import apns
@@ -87,7 +111,14 @@ def push_stats(s, now: datetime) -> dict:
             devices["web"] += 1
     rows = s.execute(select(Alert.kind, Alert.delivered, Alert.data)
                      .where(Alert.created_at >= naive_utc(now - timedelta(days=7)))).all()
-    return {"apns_configured": apns.configured(), "devices": dict(devices),
+    from .db import AppSecret
+
+    row = s.get(AppSecret, WORKER_STATUS)
+    try:
+        worker = json.loads(row.value) if row else None
+    except ValueError:
+        worker = None
+    return {"apns_configured": apns.configured(), "worker": worker, "devices": dict(devices),
             "alerts_7d": dict(Counter(k for k, _, _ in rows)),
             "delivered_7d": dict(Counter(d or "unknown" for _, d, _ in rows)),
             "errors_7d": dict(Counter((data or {}).get("push_error") or "unknown"

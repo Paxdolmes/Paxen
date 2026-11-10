@@ -89,6 +89,44 @@ def test_alert_rules(session):
     assert maybe_alert(session, ev(session, c, "victoria-severe"), MORNING) is None
 
 
+def test_alerts_dont_flip_flop_or_pile_up(session):
+    c = make_commute(session)
+    ev(session, c, "normal")
+    t = MORNING - timedelta(minutes=10)  # 08:10
+    assert maybe_alert(session, ev(session, c, "victoria-severe", now=t), t)
+    # the usual route stops running 5 minutes later: that's worth saying straight away
+    t2 = t + timedelta(minutes=5)
+    stopped = maybe_alert(session, ev(session, c, "victoria-suspended", now=t2), t2)
+    assert stopped and stopped.kind == "usual_unavailable"
+    # later it flips back to what an earlier alert already said: not sent again
+    t3 = t2 + timedelta(minutes=25)
+    again = ev(session, c, "victoria-severe", now=t3)
+    session.query(Alert).filter(Alert.kind != "usual_unavailable").update(
+        {Alert.kind: "better_route" if again.recommended is not again.usual else "leave_earlier",
+         Alert.recommended_signature: again.recommended.signature, Alert.delta_min: again.delta_min})
+    assert maybe_alert(session, again, t3) is None
+
+
+def test_alerts_keep_a_gap_and_a_daily_limit(session):
+    from paxen import engine
+
+    c = make_commute(session)
+    ev(session, c, "normal")
+    t = MORNING - timedelta(minutes=10)
+    assert maybe_alert(session, ev(session, c, "victoria-severe", now=t), t)
+    session.query(Alert).update({Alert.recommended_signature: "something else"})  # make the next one look new
+    soon = t + timedelta(minutes=5)
+    assert maybe_alert(session, ev(session, c, "victoria-severe", now=soon), soon) is None  # within 20 minutes
+    later = t + timedelta(minutes=21)
+    assert maybe_alert(session, ev(session, c, "victoria-severe", now=later), later)
+    for _ in range(engine.MAX_ALERTS_PER_DAY):
+        session.add(Alert(user_id=c.user_id, commute_id=c.id, kind="leave_earlier", title="x", body="x",
+                          confidence="high", created_at=(MORNING - timedelta(hours=1)).replace(tzinfo=None)))
+    session.query(Alert).update({Alert.recommended_signature: "another"})
+    much_later = t + timedelta(minutes=45)
+    assert maybe_alert(session, ev(session, c, "victoria-severe", now=much_later), much_later) is None  # cap
+
+
 def test_no_alert_on_normal_day_or_in_quiet_hours(session):
     c = make_commute(session, quiet_start="07:00", quiet_end="09:00")
     ev(session, c, "normal")
