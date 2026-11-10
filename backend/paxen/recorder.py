@@ -455,6 +455,9 @@ def data_stats(s: Session, now: datetime, source: str) -> dict:
         out["db_mb"] = size("SELECT pg_database_size(current_database())")
         out["predictions_mb"] = size("SELECT pg_total_relation_size('predictions')")
         out["arrivals_mb"] = size("SELECT pg_total_relation_size('observed_arrivals')")
+        out["tables_mb"] = {name: round(nbytes / 1e6) for name, nbytes in s.execute(text(
+            "SELECT relname, pg_total_relation_size(relid) FROM pg_stat_user_tables "
+            "ORDER BY pg_total_relation_size(relid) DESC LIMIT 8"))}
         # Index sizes and how often each is used (scans since the statistics were last reset), to find dead weight.
         out["indexes"] = {name: {"mb": round(nbytes / 1e6), "scans": scans} for name, nbytes, scans in s.execute(text(
             "SELECT indexrelname, pg_relation_size(indexrelid), idx_scan FROM pg_stat_user_indexes "
