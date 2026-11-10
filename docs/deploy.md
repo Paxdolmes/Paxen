@@ -69,7 +69,13 @@ PAXEN_RUN_WORKERS=0
    AWS_SECRET_ACCESS_KEY=<R2 Secret Access Key>
    AWS_ENDPOINT_URL=<R2 endpoint for S3 clients>
    AWS_REGION=auto
+   APNS_KEY_ID=${{api.APNS_KEY_ID}}
+   APNS_TEAM_ID=${{api.APNS_TEAM_ID}}
+   APNS_PRIVATE_KEY=${{api.APNS_PRIVATE_KEY}}
    ```
+
+   The three `APNS_` lines copy the iPhone push settings from the `api` service: the worker sends the alerts and daily
+   briefings, so without them no push reaches a phone. Check `/v1/health` → `data.push.worker.apns_configured`.
 
    Leaving out `PAXEN_ARCHIVE_ONLY_MODES` leaves out the network-wide bus archive (~$12/month extra, and not usable for
    training until BODS is connected). To add it later: `PAXEN_ARCHIVE_ONLY_MODES=bus` and
