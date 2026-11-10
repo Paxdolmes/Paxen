@@ -30,6 +30,8 @@ prefer and the times you usually travel.</li>
 <li><strong>Your journeys</strong>: when a trip started and finished, and the route, so Paxen can learn what a normal journey
 is for you.</li>
 <li><strong>Alerts</strong> Paxen sent you, and your rating of them if you gave one.</li>
+<li><strong>Your answers to "Did you get on the first train?"</strong>, if you give them: the station, the line and how
+full Paxen expected that train to be, so the fullness estimates can be checked. Clearing your history deletes them.</li>
 <li><strong>Your settings</strong>: quiet hours, alert thresholds, and whether monitoring is paused.</li>
 <li><strong>A notification token</strong>, if you allow notifications. Apple (or your browser's push service) issues it so
 Paxen can send alerts to your device. It identifies the device for notifications only.</li>

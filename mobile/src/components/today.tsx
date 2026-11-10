@@ -11,6 +11,7 @@ import { type ActiveTrip, revalidateAll, useActiveTrip, useLiveTrip } from '@/li
 import { persisted } from '@/lib/storage'
 import { usePalette } from '@/lib/theme'
 import { useStartTrip } from '@/lib/trip-actions'
+import { FullnessCard } from './fullness'
 import { Text } from './text'
 import {
   commuteStatusMeta,
@@ -102,6 +103,8 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
                 </Chip>
               )}
             </View>
+
+            {rec.fullness && <FullnessCard fullness={rec.fullness} />}
 
             {switched && (
               <View style={{ flexDirection: 'row', gap: 8, borderRadius: radii.md, backgroundColor: p.brandSoft, padding: 16 }}>

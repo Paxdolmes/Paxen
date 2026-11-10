@@ -15,6 +15,7 @@ from .db import Trip
 from .domain import Journey, Leg
 from .engine import NetworkContext, current_statuses, disruption_starts, forecast_journey
 from .forecast import active_model
+from .fullness import last_seen_lookup
 from .providers.base import Provider
 from .timeutil import aware, naive_utc
 
@@ -140,7 +141,8 @@ def live_status(s: Session, provider: Provider, trip: Trip, now: datetime,
                         stop_ids=leg.get("stop_ids") or []))
     statuses = current_statuses(provider, now)
     ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name),
-                         disrupted_since=disruption_starts(s, provider.name, statuses, now))
+                         disrupted_since=disruption_starts(s, provider.name, statuses, now),
+                         last_seen=last_seen_lookup(s, provider.name, now))
     fc = forecast_journey(Journey(rest, sum(l.duration_min for l in rest), now, now, provider.name), ctx, now)
     nxt = next(((rest_i, lf) for rest_i, lf in enumerate(fc.legs) if lf.line_id), None)
     next_dep = None
@@ -148,7 +150,9 @@ def live_status(s: Session, provider: Provider, trip: Trip, now: datetime,
         lf = nxt[1]
         next_dep = {"line_name": lf.line_name, "line_id": lf.line_id, "stop": lf.from_name, "direction": lf.direction,
                     "wait_min": lf.wait_min, "departures_min": lf.next_departures_min, "live": lf.live,
-                    "leg_index": idx + nxt[0]}
+                    "leg_index": idx + nxt[0], "stop_id": rest[nxt[0]].from_stop_id,
+                    # the next trains here with how full each is likely to be, and which one you'd catch
+                    "trains": lf.trains, "catch_index": lf.catch_index, "fullness": fc.fullness}
     return {
         **base, "status": "active", "located_by": used, "current_leg": idx, "phase": phase,
         "progress": round(frac, 2), "remaining_min": {"p10": fc.p10, "p50": fc.p50, "p90": fc.p90},

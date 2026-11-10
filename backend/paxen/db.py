@@ -208,6 +208,24 @@ class WatchedStop(Base):
     last_needed_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class BoardingReport(Base):
+    """One tap after boarding, "Did you get on the first train?", kept with what the fullness estimate said for
+    that train (paxen.fullness), so its thresholds can be checked against what people experience. No location."""
+    __tablename__ = "boarding_reports"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    trip_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    line_id: Mapped[str] = mapped_column(String(40))
+    stop_id: Mapped[str] = mapped_column(String(40))
+    train_at: Mapped[datetime | None] = mapped_column(DateTime)  # when the train it was about was due
+    level: Mapped[str | None] = mapped_column(String(10))  # packed | standing | space, as estimated
+    share: Mapped[float | None] = mapped_column(Float)  # estimated share of capacity
+    typical_share: Mapped[float | None] = mapped_column(Float)
+    gap_min: Mapped[float | None] = mapped_column(Float)
+    got_on: Mapped[bool] = mapped_column(Boolean)  # got on the first train that came
+
+
 class DaySample(Base):
     """Which 1-in-`stride` sample (by prediction id) of a London day's predictions the evaluation reads. Recorded
     before old days are thinned to that sample (evaluate.thin_history), so an interrupted run resumes with the same

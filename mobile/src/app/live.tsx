@@ -12,6 +12,7 @@ import { activeTripStore, useActiveTrip, useLiveTrip } from '@/lib/hooks'
 import { useGeolocation } from '@/lib/location'
 import { usePalette, useShadow } from '@/lib/theme'
 import { refreshAfterTrip } from '@/lib/trip-actions'
+import { type BoardingSnapshot, BoardingQuestion, FullnessCard } from '@/components/fullness'
 import { Text } from '@/components/text'
 import TripMap from '@/components/trip-map'
 import { ConfidenceBadge, LineChip } from '@/components/transit'
@@ -108,6 +109,41 @@ function Ended({ trip, onDone }: { trip: LiveTrip; onDone: () => void }) {
   )
 }
 
+/**
+ * Remembers the train we estimated for each boarding (while walking to or waiting at the stop) and, once you're on
+ * board, asks once whether you got on the first train.
+ */
+function useBoardingQuestion(trip: LiveTrip | undefined) {
+  type Seen = { tripId: string | null; seen: Record<number, BoardingSnapshot>; answered: number[] }
+  const [state, setState] = useState<Seen>({ tripId: null, seen: {}, answered: [] })
+  const tripId = trip?.trip_id ?? null
+  let next = state.tripId === tripId ? state : { tripId, seen: {}, answered: [] }
+  const nd = trip?.next_departure
+  const cur = trip?.current_leg ?? 0
+  if (nd?.stop_id && nd.trains?.length && (cur < nd.leg_index || trip?.phase !== 'on_board')) {
+    const train = nd.catch_index != null ? (nd.trains[nd.catch_index] ?? null) : null
+    const prev = next.seen[nd.leg_index]
+    if (train?.fullness && (prev?.train?.at !== train.at || prev.stopId !== nd.stop_id)) {
+      const snap = { legIndex: nd.leg_index, lineId: nd.line_id, stopId: nd.stop_id, train }
+      next = { ...next, seen: { ...next.seen, [nd.leg_index]: snap } }
+    }
+  }
+  if (next !== state) setState(next) // adjusting state while rendering: React re-renders straight away
+
+  let snap: BoardingSnapshot | null = null
+  if (trip?.status === 'active') {
+    for (const s of Object.values(next.seen)) {
+      const boarded = s.legIndex < cur || (s.legIndex === cur && trip.phase === 'on_board')
+      if (boarded && !next.answered.includes(s.legIndex) && (!snap || s.legIndex > snap.legIndex)) snap = s
+    }
+  }
+  const k = snap?.legIndex
+  const done = () => {
+    if (k != null) setState((st) => ({ ...st, answered: [...st.answered, k] }))
+  }
+  return { snap, done }
+}
+
 export default function LiveTripScreen() {
   const active = useActiveTrip()
   const p = usePalette()
@@ -118,6 +154,7 @@ export default function LiveTripScreen() {
   const [follow, setFollow] = useState(true)
   const [busy, setBusy] = useState<'arrive' | 'cancel' | null>(null)
   const position: [number, number] | null = geo.pos ? [geo.pos.lat, geo.pos.lon] : null
+  const ask = useBoardingQuestion(trip)
 
   const close = () => (router.canGoBack() ? router.back() : router.replace('/'))
   const finish = async () => {
@@ -263,6 +300,11 @@ export default function LiveTripScreen() {
                       {d.line_name}: {d.description}
                     </Text>
                   ))}
+                  {ask.snap ? (
+                    <BoardingQuestion key={ask.snap.legIndex} tripId={trip.trip_id} snap={ask.snap} onDone={ask.done} />
+                  ) : trip.next_departure?.fullness ? (
+                    <FullnessCard fullness={trip.next_departure.fullness} />
+                  ) : null}
                 </Card>
 
                 {geo.state !== 'watching' ? (

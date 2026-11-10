@@ -55,6 +55,7 @@ def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) 
         "on_time_chance": f.on_time_chance,
         "reliability": f.reliability,
         "crowding": f.crowding,
+        "fullness": f.fullness,
         "disruptions": f.disruptions,
         "live_data": f.live_data,
         "disruption_risk": f.disruption_risk,

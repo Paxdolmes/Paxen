@@ -5,6 +5,7 @@ import type {
   Commute,
   CommuteEvaluation,
   Dashboard,
+  FullnessLevel,
   FeedHealth,
   Insights,
   LineStatus,
@@ -106,6 +107,19 @@ export interface StartTripIn {
   followed_alert_id?: string
 }
 
+// "Did you get on the first train?", with what the app showed for that train
+export interface BoardingIn {
+  trip_id?: string
+  line_id: string
+  stop_id: string
+  train_at?: string | null
+  level?: FullnessLevel | null
+  share?: number | null
+  typical_share?: number | null
+  gap_min?: number | null
+  got_on: boolean
+}
+
 export interface ScenarioList {
   scenarios: string[]
   current: string | null
@@ -134,6 +148,7 @@ export const api = {
   /** Automatic trips: the phone left or reached Home/Work (an iOS geofence). Which place and when; no position. */
   tripEvent: (place_id: string, event: 'enter' | 'exit', at: string) =>
     request<{ action: string; reason?: string }>('POST', '/v1/trips/events', { place_id, event, at }),
+  boarding: (body: BoardingIn) => request<{ id: string; got_on: boolean }>('POST', '/v1/boarding', body),
   deleteMe: () => request<unknown>('DELETE', '/v1/me'),
   deleteHistory: () => request<{ trips_deleted: number; alerts_deleted: number }>('DELETE', '/v1/me/history'),
   onboarding: (body: OnboardingIn) => request<unknown>('POST', '/v1/onboarding', body),

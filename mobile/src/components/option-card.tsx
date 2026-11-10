@@ -5,6 +5,7 @@ import { fareLabel, fmtMin, fmtTime } from '@/shared/format'
 import { crowdingWords, newDelayRiskWords, onTimeWords, waitBasisHint } from '@/shared/plain'
 import type { RouteOption } from '@/shared/types'
 import { usePalette } from '@/lib/theme'
+import { FullnessChip, LIVE_BASIS, TrainsAhead } from './fullness'
 import { Text } from './text'
 import { ConfidenceBadge, CrowdingChip, DisruptionNote, LineChip, ModeIcon, RangeBar, type TimeAxis } from './transit'
 import { Button, Card, Chip, Divider } from './ui'
@@ -128,8 +129,13 @@ export function OptionCard({
       <View style={{ gap: 8, paddingHorizontal: 20, paddingBottom: 16 }}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
           <ConfidenceBadge confidence={option.confidence} />
-          <CrowdingChip crowding={option.crowding} />
+          {option.fullness ? <FullnessChip fullness={option.fullness} /> : <CrowdingChip crowding={option.crowding} />}
         </View>
+        {option.fullness?.advice && !off ? (
+          <Text variant="footnote" style={{ fontWeight: '600' }}>
+            {option.fullness.advice}
+          </Text>
+        ) : null}
         {option.disruptions.map((d) => (
           <DisruptionNote key={d.line_id} disruption={d} />
         ))}
@@ -178,6 +184,19 @@ export function OptionCard({
               )
             })}
           </View>
+          {option.fullness?.live && option.fullness.trains.length > 0 && (
+            <View style={{ gap: 8 }}>
+              <Text variant="footnote" tone="secondary" style={{ fontWeight: '600' }}>
+                Next trains from {option.fullness.stop}
+              </Text>
+              <TrainsAhead trains={option.fullness.trains} catchIndex={option.fullness.catch_index} />
+            </View>
+          )}
+          {option.fullness ? (
+            <Text variant="caption" tone="secondary">
+              {option.fullness.live ? LIVE_BASIS : option.fullness.basis}
+            </Text>
+          ) : null}
           {option.crowding.basis ? (
             <Text variant="caption" tone="secondary">
               {crowdingWords(option.crowding.basis)}
