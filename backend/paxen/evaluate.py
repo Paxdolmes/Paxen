@@ -284,7 +284,8 @@ def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pa
     with a lead time load_samples accepts (a looser test than load_samples' own, so every pair it could form is kept
     and training and evaluation read exactly the same pairs; tests check this). Only days whose own and previous day's
     predictions are final (thinned) are trimmed; predictions are only ever added for the present, so the answer can't
-    change later. The raw archive keeps every original response, so nothing is lost for good."""
+    change later. Trackernet and countdown arrivals can be rebuilt from the raw archive; Darwin's can't (its feed
+    isn't archived), so Darwin arrivals, the measured ground truth for rail, are always kept (~8 MB a day)."""
     import bisect
     import time
 
@@ -316,7 +317,7 @@ def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pa
                     select(ObservedArrival.id, ObservedArrival.stop_id, ObservedArrival.line_id,
                            ObservedArrival.vehicle_id, ObservedArrival.arrived_at)
                     .where(ObservedArrival.source == source, ObservedArrival.arrived_at >= a,
-                           ObservedArrival.arrived_at < b)):
+                           ObservedArrival.arrived_at < b, ObservedArrival.method != "darwin")):
                 times = seen.get((stop, line, veh), ())
                 i = bisect.bisect_left(times, arrived - PAIR_WINDOW)
                 if not (i < len(times) and times[i] <= arrived):

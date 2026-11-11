@@ -420,3 +420,51 @@ def test_arrivals_predicted_the_evening_before_are_kept(session):
     session.commit()
     assert ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)["deleted"] == 1
     assert [v for v, in session.execute(select(ObservedArrival.vehicle_id))] == ["night"]
+
+
+def test_darwin_arrivals_are_never_trimmed(session):
+    """Darwin's feed isn't archived, so its measured rail arrivals couldn't be rebuilt: they all stay."""
+    from sqlalchemy import select
+
+    from paxen import evaluate as ev
+    from paxen.db import DaySample, ObservedArrival
+
+    at = datetime(2026, 11, 2, 9, 0)
+    for veh, method in (("rail", "darwin"), ("tube", "trackernet")):
+        session.add(ObservedArrival(source="tfl", stop_id="S", line_id="weaver", vehicle_id=veh, direction="outbound",
+                                    arrived_at=at, earliest=at, latest=at, method=method, quality=1.0))
+    session.add(DaySample(source="tfl", day="2026-11-02", stride=1, thinned=True))
+    session.commit()
+    assert ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)["deleted"] == 1
+    assert [m for m, in session.execute(select(ObservedArrival.method))] == ["darwin"]
+
+
+def test_model_selection_is_identical_after_trimming(session, monkeypatch):
+    """End to end on simulator recordings: thin, evaluate and select a model, trim, do it again: the same report."""
+    import json
+
+    from sqlalchemy import func, select
+
+    from paxen import evaluate as ev
+    from paxen.db import ObservedArrival
+    from paxen.providers.sim import SimProvider
+    from paxen.recorder import record_once
+    from paxen.seed import PILOT
+
+    p = SimProvider("mixed")
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    for d in range(11):
+        t = start + timedelta(days=d, hours=8)
+        for _ in range(16):
+            record_once(session, p, t, PILOT[:4])
+            t += timedelta(seconds=90)
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 150)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)
+    now = start + timedelta(days=11, hours=12)
+    while ev.thin_history(session, "sim", now, keep_full_days=1, max_days=20, pause_s=0)["days"]:
+        pass
+    report = lambda: json.dumps(ev.run(session, "sim", promote=False), sort_keys=True, default=str)  # noqa: E731
+    before = report()
+    n = session.scalar(select(func.count()).select_from(ObservedArrival))
+    assert ev.trim_arrivals(session, "sim", max_days=20, pause_s=0)["deleted"] > 0.1 * n
+    assert report() == before and json.loads(before)["samples"] > 0
