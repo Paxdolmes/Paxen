@@ -141,11 +141,16 @@ def train_tick() -> dict:
 
 
 def thin_tick() -> dict:
-    """Storage: thin old days of predictions to the sample the evaluation reads (evaluate.thin_history)."""
-    from .evaluate import thin_history
+    """Storage: thin old days of predictions to the sample the evaluation reads (evaluate.thin_history), then drop
+    those days' arrivals that no remaining prediction can pair with (evaluate.trim_arrivals). Neither changes what
+    training or evaluation read."""
+    from .evaluate import thin_history, trim_arrivals
 
     with SessionLocal() as s:
-        return thin_history(s, get_provider().name, utcnow())
+        source = get_provider().name
+        out = thin_history(s, source, utcnow())
+        out["arrivals"] = trim_arrivals(s, source)
+        return out
 
 
 TRAIN_FIRST_DELAY_S = 600  # let the recorder run for a while after a (re)start before the first training run

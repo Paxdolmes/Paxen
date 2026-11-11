@@ -314,3 +314,109 @@ def test_a_day_thinned_before_strides_were_recorded_is_recovered(session, monkey
     left = session.scalar(select(func.count()).select_from(Prediction).where(
         Prediction.polled_at < (day + timedelta(days=1)).replace(tzinfo=None)))
     assert left <= 1400 // k + 1
+
+
+# --------------------------------------------------------------------------- arrivals trim (trim_arrivals)
+
+def _record_network_day(session, start: datetime, days: int, per_day: int):
+    """Several predictions per train visit (as the recorder stores them), each visit seen by Trackernet *and* inferred
+    from countdowns, plus visits nobody predicted (a stop the recorder doesn't store) and one train that arrives
+    just after midnight, predicted the evening before."""
+    from paxen.db import ObservedArrival, Prediction
+
+    def arrival(veh, arr, method, direction):
+        session.add(ObservedArrival(source="tfl", stop_id="940GZZLUFBY", line_id="district", vehicle_id=veh,
+                                    direction=direction, arrived_at=arr, earliest=arr, latest=arr, method=method,
+                                    quality=1.0 if method == "trackernet" else 0.8))
+
+    for d in range(days):
+        for i in range(per_day):
+            arr = (start + timedelta(days=d, minutes=20 + i * (1380 // per_day))).replace(tzinfo=None)
+            veh = f"t{d}-{i}"
+            for lead in (840, 600, 360, 120, 90, 60, 30):  # one per lead group, then the last two minutes
+                polled = arr - timedelta(seconds=lead + 20)
+                session.add(Prediction(source="tfl", polled_at=polled, stop_id="940GZZLUFBY", line_id="district",
+                                       mode="tube", direction="inbound", platform="Eastbound - Platform 1",
+                                       vehicle_id=veh, expected_arrival=arr + timedelta(seconds=(i % 5) * 10 - 20),
+                                       tts_s=lead))
+            arrival(veh, arr, "trackernet", "eastbound")
+            arrival(veh, arr + timedelta(seconds=15), "countdown_inferred", "inbound")
+            arrival(f"x{d}-{i}", arr, "trackernet", "westbound")  # a train nobody predicted
+    # 23:55 the evening before day 2, arriving 00:10 on day 2
+    late = (start + timedelta(days=2) - timedelta(minutes=5)).replace(tzinfo=None)
+    session.add(Prediction(source="tfl", polled_at=late, stop_id="940GZZLUFBY", line_id="district", mode="tube",
+                           direction="inbound", platform="Eastbound - Platform 1", vehicle_id="night",
+                           expected_arrival=late + timedelta(minutes=15), tts_s=900))
+    arrival("night", late + timedelta(minutes=15), "trackernet", "eastbound")
+    session.commit()
+
+
+def test_trimming_arrivals_changes_nothing_training_or_evaluation_reads(session, monkeypatch):
+    from sqlalchemy import func, select
+
+    from paxen import evaluate as ev
+    from paxen.db import DaySample, ObservedArrival
+    from paxen.forecast import load_samples
+
+    monkeypatch.setattr(ev, "MAX_PER_DAY", 5)
+    monkeypatch.setattr(ev, "PRESAMPLE", 2)  # 7 x 40 = 280 predictions a day -> every 28th is kept
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_network_day(session, start, days=5, per_day=40)
+    now = start + timedelta(days=4, hours=12)
+    ev.thin_history(session, "tfl", now, keep_full_days=1, max_days=10, pause_s=0)  # 2-4 Nov thinned
+    ev.thin_history(session, "tfl", now, keep_full_days=1, max_days=10, pause_s=0)
+    reads = lambda: (_key(ev.load_daily(session, "tfl", ("trackernet",))), _key(ev.load_daily(session, "tfl", None)),  # noqa: E731
+                     _key(load_samples(session, "tfl")))
+    before = reads()
+    n = session.scalar(select(func.count()).select_from(ObservedArrival))
+
+    res = ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)
+    assert res["deleted"] > 0.6 * 3 * 40 * 3  # most of the thinned days' arrivals had nothing left to pair with
+    assert session.scalar(select(func.count()).select_from(ObservedArrival)) == n - res["deleted"]
+    assert reads() == before and before[0]  # identical pairs for training and both evaluations
+    # the train predicted before midnight keeps its arrival exactly when that prediction survived thinning
+    from paxen.db import Prediction
+
+    night_pred = session.scalar(select(Prediction.id).where(Prediction.vehicle_id == "night"))
+    night_arr = session.scalar(select(ObservedArrival.id).where(ObservedArrival.vehicle_id == "night"))
+    assert (night_arr is not None) == (night_pred is not None)
+    # recent (unthinned) days are untouched
+    recent = (start + timedelta(days=3)).replace(tzinfo=None)
+    assert session.scalar(select(func.count()).select_from(ObservedArrival).where(
+        ObservedArrival.arrived_at >= recent)) == 2 * 40 * 3
+    assert all(r.arrivals_trimmed == r.thinned for r in session.scalars(select(DaySample)))
+    assert ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)["deleted"] == 0  # once per day
+
+
+def test_a_day_waits_until_the_day_before_is_thinned(session, monkeypatch):
+    from paxen import evaluate as ev
+    from paxen.db import DaySample
+
+    start = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    _record_network_day(session, start, days=3, per_day=10)
+    session.add_all([DaySample(source="tfl", day="2026-11-01", stride=1, thinned=False),
+                     DaySample(source="tfl", day="2026-11-02", stride=1, thinned=False),
+                     DaySample(source="tfl", day="2026-11-03", stride=1, thinned=True)])
+    session.commit()
+    assert ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)["days"] == []  # 2 Nov's predictions aren't final
+
+
+def test_arrivals_predicted_the_evening_before_are_kept(session):
+    from sqlalchemy import select
+
+    from paxen import evaluate as ev
+    from paxen.db import DaySample, ObservedArrival, Prediction
+
+    late = datetime(2026, 11, 2, 23, 50)  # GMT = London in November
+    session.add(Prediction(source="tfl", polled_at=late, stop_id="S", line_id="district", mode="tube",
+                           direction="inbound", vehicle_id="night", expected_arrival=late + timedelta(minutes=20),
+                           tts_s=1200))
+    for veh, at in (("night", late + timedelta(minutes=21)), ("other", late + timedelta(minutes=30))):
+        session.add(ObservedArrival(source="tfl", stop_id="S", line_id="district", vehicle_id=veh,
+                                    direction="eastbound", arrived_at=at, earliest=at, latest=at,
+                                    method="trackernet", quality=1.0))
+    session.add_all([DaySample(source="tfl", day="2026-11-02", stride=1, thinned=True),
+                     DaySample(source="tfl", day="2026-11-03", stride=1, thinned=True)])
+    session.commit()
+    assert ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)["deleted"] == 1
+    assert [v for v, in session.execute(select(ObservedArrival.vehicle_id))] == ["night"]

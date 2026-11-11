@@ -237,6 +237,8 @@ class DaySample(Base):
     day: Mapped[str] = mapped_column(String(10), primary_key=True)  # London date, YYYY-MM-DD
     stride: Mapped[int] = mapped_column(Integer)
     thinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # the day's arrivals that no stored prediction can pair with have been deleted (evaluate.trim_arrivals)
+    arrivals_trimmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AppSecret(Base):
@@ -332,7 +334,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("users", "web_push", "JSON"),
                   ("users", "auto_trips", "BOOLEAN DEFAULT FALSE"),
                   ("users", "auto_trip_stats", "JSON"),
-                  ("commutes", "briefing_at", "VARCHAR(5)")]
+                  ("commutes", "briefing_at", "VARCHAR(5)"),
+                  ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE")]
 
 
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).

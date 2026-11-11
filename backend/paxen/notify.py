@@ -82,7 +82,11 @@ def note_worker(s, now: datetime) -> None:
     from . import apns
     from .db import AppSecret
 
-    value = json.dumps({"apns_configured": apns.configured(), "seen_at": now.isoformat()})
+    import os
+
+    value = json.dumps({"apns_configured": apns.configured(), "seen_at": now.isoformat(),
+                        # how many days of predictions and arrivals the worker keeps (recorder.prune)
+                        "prediction_retention_days": int(os.getenv("PAXEN_PREDICTION_RETENTION_DAYS", "60"))})
     row = s.get(AppSecret, WORKER_STATUS)
     if row:
         row.value = value
