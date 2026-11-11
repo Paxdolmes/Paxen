@@ -10,13 +10,13 @@ import logging
 import statistics
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import DaySample, ModelVersion, Prediction
-from .forecast import Sample, lead_bucket, load_samples, model_kind
+from .db import DaySample, ModelVersion, ObservedArrival, Prediction
+from .forecast import MAX_LEAD_S, Sample, lead_bucket, load_samples, model_kind
 from .models import CANDIDATES, SIMPLICITY, Conformal
 from .timeutil import LONDON, aware, naive_utc
 
@@ -270,6 +270,82 @@ def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = K
             out["days"].append(f"{key} (kept 1 in {k})")
         rec.thinned = True
         s.commit()
+    return out
+
+
+PAIR_WINDOW = timedelta(seconds=MAX_LEAD_S + 900)  # load_samples pairs an arrival with predictions this far before it
+TRIM_DELETE_BATCH = 1000
+
+
+def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pause_s: float = THIN_PAUSE_S) -> dict:
+    """Storage. After a day's predictions are thinned (thin_history), most of its arrivals have no stored prediction
+    left to pair with, and load_samples, the only reader of old arrivals, can never use them. Delete exactly those:
+    an arrival stays if any stored prediction of the same stop, line and vehicle was made within PAIR_WINDOW before it
+    with a lead time load_samples accepts (a looser test than load_samples' own, so every pair it could form is kept
+    and training and evaluation read exactly the same pairs; tests check this). Only days whose own and previous day's
+    predictions are final (thinned) are trimmed; predictions are only ever added for the present, so the answer can't
+    change later. Trackernet and countdown arrivals can be rebuilt from the raw archive; Darwin's can't (its feed
+    isn't archived), so Darwin arrivals, the measured ground truth for rail, are always kept (~8 MB a day)."""
+    import bisect
+    import time
+
+    out: dict = {"days": [], "deleted": 0}
+    recs = s.scalars(select(DaySample).where(DaySample.source == source).order_by(DaySample.day)).all()
+    thinned = {r.day for r in recs if r.thinned}
+    first = recs[0].day if recs else None
+    for rec in recs:
+        if not rec.thinned or rec.arrivals_trimmed or len(out["days"]) >= max_days:
+            continue
+        day = _day_start_utc(rec.day)
+        prev = str((aware(day).astimezone(LONDON) - timedelta(hours=12)).date())
+        if rec.day != first and prev not in thinned:
+            continue  # the previous day's predictions (which pair with this day's early arrivals) aren't final yet
+        nxt = _day_start_utc(str((aware(day).astimezone(LONDON) + timedelta(hours=36)).date()))
+        a, end, deleted = naive_utc(day), naive_utc(nxt), 0
+        while a < end:
+            b = min(a + THIN_SLICE, end)
+            seen: dict[tuple, list] = defaultdict(list)
+            for stop, line, veh, polled in s.execute(
+                    select(Prediction.stop_id, Prediction.line_id, Prediction.vehicle_id, Prediction.polled_at)
+                    .where(Prediction.source == source, Prediction.polled_at >= a - PAIR_WINDOW,
+                           Prediction.polled_at < b, Prediction.tts_s <= MAX_LEAD_S)):
+                seen[(stop, line, veh)].append(polled)
+            for v in seen.values():
+                v.sort()
+            gone = []
+            for aid, stop, line, veh, arrived in s.execute(
+                    select(ObservedArrival.id, ObservedArrival.stop_id, ObservedArrival.line_id,
+                           ObservedArrival.vehicle_id, ObservedArrival.arrived_at)
+                    .where(ObservedArrival.source == source, ObservedArrival.arrived_at >= a,
+                           ObservedArrival.arrived_at < b, ObservedArrival.method != "darwin")):
+                times = seen.get((stop, line, veh), ())
+                i = bisect.bisect_left(times, arrived - PAIR_WINDOW)
+                if not (i < len(times) and times[i] <= arrived):
+                    gone.append(aid)
+            if gone:
+                # Belt and braces, on the real data: every pair that could involve these arrivals (predictions made
+                # within PAIR_WINDOW before the slice ends) must read the same before and after, or nothing is deleted.
+                window = {"since": (a - PAIR_WINDOW).replace(tzinfo=timezone.utc),
+                          "until": b.replace(tzinfo=timezone.utc)}
+                pairs = load_samples(s, source, min_quality=0.0, **window)
+                n = 0
+                for i in range(0, len(gone), TRIM_DELETE_BATCH):
+                    n += s.query(ObservedArrival).filter(
+                        ObservedArrival.id.in_(gone[i:i + TRIM_DELETE_BATCH])).delete(synchronize_session=False)
+                if load_samples(s, source, min_quality=0.0, **window) == pairs:
+                    s.commit()
+                    deleted += n
+                else:
+                    s.rollback()
+                    out["refused"] = out.get("refused", 0) + 1
+                    log.error("arrivals trim refused for %s %s: the training pairs would have changed", source, a)
+            a = b
+            if pause_s and gone:
+                time.sleep(pause_s)
+        rec.arrivals_trimmed = True
+        s.commit()
+        out["days"].append(f"{rec.day} (-{deleted} arrivals)")
+        out["deleted"] += deleted
     return out
 
 

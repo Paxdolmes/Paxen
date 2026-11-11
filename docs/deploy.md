@@ -143,7 +143,8 @@ Tests against Postgres: `PAXEN_TEST_DATABASE_URL=postgresql://postgres@localhost
 Measured on live data (3 Nov 2026):
 - **Postgres** (measured 9 Nov 2026): about 1.8M prediction rows a day (~0.55 GB) and 380k arrivals a day
   (~0.1 GB). Predictions from before yesterday are thinned to the sample the model evaluation reads (about 1 in 17, see
-  docs/model-evaluation.md), so a day of history costs ~0.13 GB once it's old. Rough size by retention
+  docs/model-evaluation.md), so a day of history costs ~0.13 GB once it's old; the same days' arrivals that no kept
+  prediction can pair with are then deleted too (`trim_arrivals`). Rough size by retention
   (`PAXEN_PREDICTION_RETENTION_DAYS`, default 60): 60 days ~10 GB, 30 days ~6 GB, 14 days ~4 GB. `/v1/health` shows the
   live size (`data.db_mb`). Railway's Hobby plan caps a volume at 5 GB; Pro starts at 50 GB. Postgres reuses the space
   of deleted rows but doesn't hand it back to the disk, so the on-disk size never shrinks by itself.

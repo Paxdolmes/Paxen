@@ -139,4 +139,4 @@ def test_the_worker_reports_whether_it_can_send_iphone_pushes(client, monkeypatc
         notify.note_worker(s, MORNING)
     recorder._DATA_STATS.clear()
     worker = c.get("/v1/health").json()["data"]["push"]["worker"]
-    assert worker == {"apns_configured": False, "seen_at": MORNING.isoformat()}
+    assert worker == {"apns_configured": False, "seen_at": MORNING.isoformat(), "prediction_retention_days": 60}
