@@ -10,7 +10,7 @@ import logging
 import statistics
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -322,10 +322,23 @@ def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pa
                 i = bisect.bisect_left(times, arrived - PAIR_WINDOW)
                 if not (i < len(times) and times[i] <= arrived):
                     gone.append(aid)
-            for i in range(0, len(gone), TRIM_DELETE_BATCH):
-                deleted += s.query(ObservedArrival).filter(
-                    ObservedArrival.id.in_(gone[i:i + TRIM_DELETE_BATCH])).delete(synchronize_session=False)
-            s.commit()
+            if gone:
+                # Belt and braces, on the real data: every pair that could involve these arrivals (predictions made
+                # within PAIR_WINDOW before the slice ends) must read the same before and after, or nothing is deleted.
+                window = {"since": (a - PAIR_WINDOW).replace(tzinfo=timezone.utc),
+                          "until": b.replace(tzinfo=timezone.utc)}
+                pairs = load_samples(s, source, min_quality=0.0, **window)
+                n = 0
+                for i in range(0, len(gone), TRIM_DELETE_BATCH):
+                    n += s.query(ObservedArrival).filter(
+                        ObservedArrival.id.in_(gone[i:i + TRIM_DELETE_BATCH])).delete(synchronize_session=False)
+                if load_samples(s, source, min_quality=0.0, **window) == pairs:
+                    s.commit()
+                    deleted += n
+                else:
+                    s.rollback()
+                    out["refused"] = out.get("refused", 0) + 1
+                    log.error("arrivals trim refused for %s %s: the training pairs would have changed", source, a)
             a = b
             if pause_s and gone:
                 time.sleep(pause_s)

@@ -468,3 +468,22 @@ def test_model_selection_is_identical_after_trimming(session, monkeypatch):
     n = session.scalar(select(func.count()).select_from(ObservedArrival))
     assert ev.trim_arrivals(session, "sim", max_days=20, pause_s=0)["deleted"] > 0.1 * n
     assert report() == before and json.loads(before)["samples"] > 0
+
+
+def test_a_slice_is_kept_if_its_training_pairs_would_change(session, monkeypatch):
+    """The trim re-reads the pairs around each slice after deleting and rolls back if anything differs."""
+    from sqlalchemy import func, select
+
+    from paxen import evaluate as ev
+    from paxen.db import DaySample, ObservedArrival
+
+    at = datetime(2026, 11, 2, 9, 0)
+    session.add(ObservedArrival(source="tfl", stop_id="S", line_id="district", vehicle_id="v", direction="eastbound",
+                                arrived_at=at, earliest=at, latest=at, method="trackernet", quality=1.0))
+    session.add(DaySample(source="tfl", day="2026-11-02", stride=1, thinned=True))
+    session.commit()
+    calls = iter(range(10_000))
+    monkeypatch.setattr(ev, "load_samples", lambda *a, **k: [next(calls)])  # pretend the pairs changed
+    res = ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)
+    assert res["deleted"] == 0 and res["refused"] == 1
+    assert session.scalar(select(func.count()).select_from(ObservedArrival)) == 1
