@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .db import DaySample, ModelVersion, ObservedArrival, Prediction
-from .forecast import MAX_LEAD_S, Sample, lead_bucket, load_samples, model_kind
+from .forecast import MAX_LEAD_S, PLACEHOLDER_VEHICLE_IDS, Sample, lead_bucket, load_samples, model_kind
 from .models import CANDIDATES, SIMPLICITY, Conformal
 from .timeutil import LONDON, aware, naive_utc
 
@@ -116,6 +116,9 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
                 per_day[d][name]["by_lead"] = _breakdown(test, preds, lambda x: lead_bucket(x.lead_s))
                 per_day[d][name]["by_line"] = _breakdown(test, preds, lambda x: x.line_id)
     report["per_day"] = per_day
+    # every test day's headline numbers, kept in the stored report (the full per-day breakdowns aren't)
+    report["per_day_headline"] = {d: {n: {k: m.get(k) for k in ("n", "mae_s", "decision_mae_s", "coverage")}
+                                      for n, m in per_day[d].items()} for d in per_day}
 
     summary, eligible = {}, []
     prov = [per_day[d]["provider"]["mae_s"] for d in per_day]
@@ -150,6 +153,60 @@ def evaluate(samples: list[Sample], candidates: dict | None = None) -> dict:
                   message=f"{winner}: {summary[winner]['mean_mae_s']}s vs TfL {summary['provider']['mean_mae_s']}s "
                           f"mean error over {len(per_day)} unseen days.")
     return report
+
+
+def _spread(errors: list[float]) -> dict:
+    """Shape of a set of raw (uncorrected) errors in seconds: positive = the train came later than TfL said."""
+    if not errors:
+        return {"n": 0}
+    xs = sorted(errors)
+    q = lambda p: round(xs[min(len(xs) - 1, int(p * len(xs)))])  # noqa: E731
+    over = lambda t: round(sum(abs(e) > t for e in xs) / len(xs), 3)  # noqa: E731
+    return {"n": len(xs), "mae_s": round(statistics.fmean(abs(e) for e in xs), 1), "p05": q(0.05), "p25": q(0.25),
+            "p50": q(0.5), "p75": q(0.75), "p95": q(0.95), "over_2m": over(120), "over_5m": over(300),
+            "over_10m": over(600)}
+
+
+AUDIT_DAYS = 3
+NEAR_BANDS = [(0, 15), (15, 30), (30, 60), (60, 120)]  # seconds to arrival when the prediction was made
+
+
+def audit(samples: list[Sample]) -> dict:
+    """Is each prediction paired with the arrival it was about? A health check on the ground truth, from TfL's raw
+    (uncorrected) errors on the most recent days; no model is involved. A train TfL says is under two minutes away
+    can't really be ten minutes late, so big errors at short range mean wrong pairs (shared train ids, trains
+    waiting at a terminus), not bad predictions. Reported with every evaluation; it decides nothing."""
+    days = sorted({x.day for x in samples})[-AUDIT_DAYS:]
+    recent = [x for x in samples if x.day in days]
+    if not recent:
+        return {}
+    vehicle = lambda x: (x.event or "|||").split("|")[2]  # noqa: E731
+    by_lead: dict[str, list[float]] = defaultdict(list)
+    for x in recent:
+        by_lead[lead_bucket(x.lead_s)].append(x.error_s)
+    near = [x for x in recent if x.lead_s < 120]
+    shared = [x for x in recent if vehicle(x) in PLACEHOLDER_VEHICLE_IDS]
+    by_line: dict[str, list[float]] = defaultdict(list)
+    for x in near:
+        by_line[x.line_id].append(x.error_s)
+    bad = defaultdict(int)
+    total = defaultdict(int)
+    for x in near:
+        total[(x.stop_id, x.line_id)] += 1
+        bad[(x.stop_id, x.line_id)] += abs(x.error_s) > 300
+    worst = sorted(bad, key=lambda k: -bad[k])[:25]
+    return {
+        "days": days, "samples": len(recent),
+        "by_lead": {b: _spread(v) for b, v in sorted(by_lead.items())},
+        "under_2m_by_seconds_away": {f"{lo}-{hi}s": _spread([x.error_s for x in near if lo <= x.lead_s < hi])
+                                     for lo, hi in NEAR_BANDS},
+        "under_2m_by_line": {line: _spread(v) for line, v in sorted(by_line.items())},
+        "shared_train_ids": {**_spread([x.error_s for x in shared]), "share": round(len(shared) / len(recent), 4),
+                             "under_2m": _spread([x.error_s for x in shared if x.lead_s < 120])},
+        "identified_trains_under_2m": _spread([x.error_s for x in near if vehicle(x) not in PLACEHOLDER_VEHICLE_IDS]),
+        "worst_stops_under_2m": [{"stop": s, "line": l, "over_5m": bad[(s, l)], "n": total[(s, l)]}
+                                 for s, l in worst if bad[(s, l)]],
+    }
 
 
 MAX_PER_DAY = 25_000  # memory guard: a fixed random sample of each day's training pairs
@@ -351,10 +408,16 @@ def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pa
 
 def run(s: Session, source: str, promote: bool = True) -> dict:
     """Evaluate on the database's history. Ground truth: measured (Trackernet) when it exists, else inferred."""
+    import time
+
+    t0 = time.monotonic()
     measured = load_daily(s, source, ("trackernet",))
     samples = measured if measured else load_daily(s, source, None)
+    loaded_s = time.monotonic() - t0
     report = evaluate(samples)
     report["ground_truth"] = "measured (Trackernet)" if measured else "inferred from countdowns"
+    report["audit"] = audit(samples)
+    report["timing"] = {"load_s": round(loaded_s), "evaluate_s": round(time.monotonic() - t0 - loaded_s)}
     # Amendment 3: Overground and Elizabeth line, measured by Darwin, reported alongside (never decides promotion)
     rail = load_daily(s, source, ("darwin",))
     if rail:

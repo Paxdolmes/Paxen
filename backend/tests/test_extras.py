@@ -145,3 +145,22 @@ def test_health_reports_ground_truth_by_method():
         s.commit()
     data = TestClient(app).get("/v1/health").json()["data"]
     assert data["arrivals_24h"].get("darwin", 0) >= 2 and data["arrivals_24h"].get("trackernet", 0) >= 1
+
+
+def test_model_report_endpoint_returns_the_latest_evaluation():
+    from fastapi.testclient import TestClient
+
+    import paxen.main as main
+    from paxen.db import ModelVersion, SessionLocal
+    from paxen.forecast import model_kind
+    from paxen.providers import get_provider
+
+    with TestClient(main.app) as c:
+        assert c.get("/v1/model/report").status_code == 401
+        c.headers["Authorization"] = "Bearer " + c.post("/v1/users").json()["token"]
+        with SessionLocal() as s:
+            s.add(ModelVersion(kind=model_kind(get_provider().name), params={"model": "provider"},
+                               metrics={"status": "winner", "audit": {"samples": 3}}, active=False, note="test run"))
+            s.commit()
+        rep = c.get("/v1/model/report").json()
+        assert rep["note"] == "test run" and rep["metrics"]["audit"] == {"samples": 3} and rep["active"] is False

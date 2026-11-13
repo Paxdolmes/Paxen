@@ -802,6 +802,21 @@ def alert_feedback(alert_id: str, body: FeedbackIn, u: User = Depends(current_us
 
 
 # ----------------------------------------------------------------------- insights
+@app.get("/v1/model/report")
+def model_report(u: User = Depends(current_user), s: Session = Depends(db)):
+    """The latest model evaluation in full: every candidate's scores per test day, the rail report and the pairing
+    audit (paxen/evaluate.py). Aggregate statistics about TfL's feeds; nothing about any user."""
+    from .db import ModelVersion
+    from .forecast import model_kind
+
+    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(get_provider().name))
+                   .order_by(ModelVersion.id.desc())).first()
+    if not mv:
+        raise HTTPException(404, "No model evaluation has run yet.")
+    return {"version": mv.id, "active": mv.active, "evaluated_at": mv.created_at.isoformat() + "Z", "note": mv.note,
+            "metrics": mv.metrics}
+
+
 @app.get("/v1/insights")
 def get_insights(u: User = Depends(current_user), s: Session = Depends(db)):
     return build_insights(s, u.id, now(), get_provider().name)

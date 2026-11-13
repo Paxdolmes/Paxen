@@ -170,3 +170,15 @@ Addendum (11 November 2026, not a change to the protocol): once a day and the da
 At the same time, `load_samples` now returns pairs in prediction-id order before sorting them by time, so the seeded
 per-day sample (rule: "same seed, same sample") no longer depends on the order the database returns rows in.
 
+---
+
+## Pairing audit (13 November 2026, after the first verdict; not a change to the protocol)
+
+The first verdict (13 November: `gbm`, 66.8 s against TfL's 97.1 s over three unseen days) showed TfL's own error as
+*larger* in the last two minutes before arrival (113 s) than at 2-5 minutes (53 s), which a real countdown can't do.
+So every evaluation now also stores a pairing audit (`evaluate.audit`): the shape of TfL's raw errors on the latest
+three days by lead time, by seconds-to-arrival under two minutes, by line, for trains with a shared placeholder id
+("000"), and the stations with the most errors over five minutes at short range. It uses no model and decides
+nothing; it exists to show whether predictions are being paired with the arrival they were about. The full stored
+report is readable at `GET /v1/model/report`.
+

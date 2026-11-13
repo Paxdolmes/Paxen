@@ -26,6 +26,9 @@ LEAD_BUCKETS = [(0, 120, "0-2m"), (120, 300, "2-5m"), (300, 600, "5-10m"), (600,
 SHRINK_K = 25.0
 MAX_LEAD_S = 1800
 MEASURED = ("trackernet", "darwin")  # ground truth measured by the railway (Tube; Overground and Elizabeth line)
+# Ids TfL gives trains its systems can't identify. Different trains share them (about a third of Metropolitan line
+# listings are "000"), so they can't say which arrival a prediction was about.
+PLACEHOLDER_VEHICLE_IDS = frozenset({"000", "0", "", "None", "null"})
 
 
 def lead_bucket(lead_s: float) -> str:
