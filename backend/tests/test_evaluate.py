@@ -463,7 +463,8 @@ def test_model_selection_is_identical_after_trimming(session, monkeypatch):
     now = start + timedelta(days=11, hours=12)
     while ev.thin_history(session, "sim", now, keep_full_days=1, max_days=20, pause_s=0)["days"]:
         pass
-    report = lambda: json.dumps(ev.run(session, "sim", promote=False), sort_keys=True, default=str)  # noqa: E731
+    report = lambda: json.dumps({k: v for k, v in ev.run(session, "sim", promote=False).items() if k != "timing"},  # noqa: E731
+                                sort_keys=True, default=str)
     before = report()
     n = session.scalar(select(func.count()).select_from(ObservedArrival))
     assert ev.trim_arrivals(session, "sim", max_days=20, pause_s=0)["deleted"] > 0.1 * n
@@ -487,3 +488,31 @@ def test_a_slice_is_kept_if_its_training_pairs_would_change(session, monkeypatch
     res = ev.trim_arrivals(session, "tfl", max_days=10, pause_s=0)
     assert res["deleted"] == 0 and res["refused"] == 1
     assert session.scalar(select(func.count()).select_from(ObservedArrival)) == 1
+
+
+# --------------------------------------------------------------------------- pairing audit
+
+def test_audit_separates_wrong_pairs_from_bad_predictions():
+    from paxen import evaluate as ev
+
+    t0 = datetime(2026, 11, 10, 8, 0, tzinfo=timezone.utc)
+
+    def s(lead, err, vehicle="201", stop="940GZZLUVIC", line="victoria", day=0):
+        t = t0 + timedelta(days=day)
+        return Sample(t, line, stop, lead, "am_peak", False, err, 1.0, "good", 1, 120, 20.0, "trackernet",
+                      t + timedelta(seconds=lead + err), f"{stop}|{line}|{vehicle}|x", "northbound")
+
+    good = ([s(60, 10 + i % 20) for i in range(40)] + [s(60, 15, day=-1) for _ in range(10)]
+            + [s(60, 15, day=-2) for _ in range(10)] + [s(400, 30) for _ in range(40)])
+    waiting_at_terminus = [s(10, 480, stop="940GZZLUALD", line="metropolitan") for _ in range(20)]
+    shared_id = [s(90, 700, vehicle="000", stop="940GZZLUUXB", line="metropolitan") for _ in range(10)]
+    old = [s(60, 5000, day=-9) for _ in range(50)]  # outside the audit's last three days
+    a = ev.audit(old + good + waiting_at_terminus + shared_id)
+    assert a["samples"] == 130 and len(a["days"]) == 3
+    assert a["under_2m_by_seconds_away"]["0-15s"]["over_5m"] == 1.0  # every "due now" sample was 8 minutes out
+    assert a["under_2m_by_seconds_away"]["60-120s"]["n"] == 70
+    assert a["shared_train_ids"]["n"] == 10 and a["shared_train_ids"]["share"] == round(10 / 130, 4)
+    assert a["identified_trains_under_2m"]["n"] == 80
+    assert a["worst_stops_under_2m"][0] == {"stop": "940GZZLUALD", "line": "metropolitan", "over_5m": 20, "n": 20}
+    assert a["under_2m_by_line"]["victoria"]["over_5m"] == 0.0
+    assert ev.audit([]) == {}
