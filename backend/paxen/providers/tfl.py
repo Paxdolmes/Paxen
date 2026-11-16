@@ -22,10 +22,11 @@ from ..cache import prune
 from ..redact import check, redact
 
 from ..domain import (
-    GOOD, MINOR, PART_SUSPENDED, SEVERE, SEVERITY_ORDER, SUSPENDED,
+    GOOD, MINOR, PART_SUSPENDED, PLACEHOLDER_VEHICLE_IDS, SEVERE, SEVERITY_ORDER, SUSPENDED,
     Arrival, FetchResult, Journey, Leg, LineStatus, NearbyStop, PlaceResult, StatusSection, simplify_path,
 )
 from ..timeutil import LONDON
+from ..trackernet import bound_of
 
 log = logging.getLogger("paxen.tfl")
 
@@ -71,13 +72,21 @@ def _tts(a: dict, exp: datetime, ts: datetime | None) -> int:
     return max(0, int(round((exp - ref).total_seconds())))
 
 
-def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
-    """Normalise TfL arrivals.
+SAME_TRAIN_S = 45  # listings of an unidentified train this close together (same direction) are one train
 
-    At a terminus TfL lists each incoming train once per platform it might use; we keep one row per
-    (line, vehicle) — the earliest — and flag trains that terminate here (they form the next departure).
+
+def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
+    """Normalise TfL arrivals: one row per train call at the stop.
+
+    TfL lists a train more than once in three situations, which need different handling:
+    * at a terminus, once per platform it might use: one arrival (the earliest), flagged `terminates_here`;
+    * where a direction has alternative platforms (fast/slow), once per platform: one arrival per direction;
+    * near the end of a line, on its way out and again, facing the other way, on its way back: both are kept
+      (they are different calls; merging them hid the return trip until the train had passed).
+    Trains TfL's systems can't identify all share a placeholder id ("000", about a third of Metropolitan line
+    listings): those are told apart by direction and time instead, so each still gets its own row.
     """
-    best: dict[tuple[str, str], Arrival] = {}
+    groups: dict[tuple, list[Arrival]] = {}
     for a in payload:
         exp, ts = _dt(a.get("expectedArrival")), _dt(a.get("timestamp"))
         if not exp:
@@ -94,12 +103,24 @@ def parse_arrivals(payload: list[dict], stop_id: str) -> list[Arrival]:
             destination=_clean_name(a.get("destinationName", "")),
             expected_arrival=exp, time_to_station_s=_tts(a, exp, ts),
             feed_timestamp=ts or datetime.now(timezone.utc), platform=a.get("platformName"),
-            terminates_here=terminates,
+            terminates_here=terminates, destination_id=dest_id or None,
+            at_platform=(a.get("currentLocation") or "").strip().lower() == "at platform",
         )
-        key = (arr.line_id, arr.vehicle_id)
-        if key not in best or arr.time_to_station_s < best[key].time_to_station_s:
-            best[key] = arr
-    return sorted(best.values(), key=lambda x: x.time_to_station_s)
+        # which way the train is going at this stop; at its terminus every platform is the same call
+        way = None if terminates else (bound_of(arr.platform) or "")
+        groups.setdefault((arr.line_id, arr.vehicle_id, way), []).append(arr)
+    out: list[Arrival] = []
+    for (_, vehicle, _), rows in groups.items():
+        rows.sort(key=lambda x: x.time_to_station_s)
+        if vehicle not in PLACEHOLDER_VEHICLE_IDS:
+            out.append(rows[0])
+            continue
+        last = None
+        for arr in rows:  # different trains share the id: a new train wherever there's a gap in time
+            if last is None or arr.time_to_station_s - last > SAME_TRAIN_S:
+                out.append(arr)
+            last = arr.time_to_station_s
+    return sorted(out, key=lambda x: x.time_to_station_s)
 
 
 def _cache_buster() -> str:

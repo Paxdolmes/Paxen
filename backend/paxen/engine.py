@@ -83,6 +83,8 @@ class NetworkContext:
     # when the train ahead was last seen at a platform (paxen.fullness.last_seen_lookup); None: not known
     last_seen: Callable | None = None
     _arrivals: dict[str, list[Arrival] | None] = field(default_factory=dict)
+    # the model's correction for each arrival, by id(arrival): several route options board at the same stop
+    predictions: dict[int, dict] = field(default_factory=dict)
 
     def chance_still_on(self, line_id: str | None, category: str, when: datetime) -> float:
         """Chance a disruption showing now still applies at `when` (TfL's status history, paxen.disruptions).
@@ -190,10 +192,52 @@ TERMINUS_TURNAROUND_S = 150  # a train terminating at the boarding stop departs 
 
 
 def _matches_direction(a: Arrival, leg_direction: str | None) -> bool:
-    if not leg_direction or a.terminates_here:
+    """By name: the planner's direction against the train's destination. Used where the line map can't decide."""
+    if not leg_direction:
         return True
     d = leg_direction.lower()
-    return a.direction.lower() in d or d in a.direction.lower() or a.destination.lower() in d
+    names = [n.lower() for n in (a.direction, a.destination) if n]
+    return any(n in d or d in n for n in names)  # no destination given: can't claim it's your train
+
+
+def goes_your_way(a: Arrival, leg: Leg) -> bool:
+    """Is this a train you could take for this leg?
+
+    TfL's planner names one scheduled train's destination ("Upminster") as the leg's direction, but every train
+    that calls at your alighting stop will do: from Fulham Broadway to Victoria that's also the Barking, Tower Hill
+    and Dagenham East trains, and not the Edgware Road ones, which leave the same platform. So where the line is on
+    NUMBAT's map the train's own destination decides (numbat.serves); names are the fallback (buses, National Rail,
+    loops and the Northern line's two central branches)."""
+    to_stop = leg.to_stop_id or (leg.stop_ids[-1] if leg.stop_ids else None)
+    here = a.stop_id or leg.from_stop_id
+    if a.terminates_here:
+        # It turns round here. That makes it your next departure only at the end of the line; mid-line (a bay
+        # platform at Tower Hill) it goes back the way it came.
+        starts = numbat.starts_here(leg.line_id, here, to_stop)
+        return True if starts is None else starts
+    served = numbat.serves(leg.line_id, here, to_stop, a.destination_id, bound_of(a.platform))
+    if served is not None:
+        return served
+    return _matches_direction(a, leg.direction)
+
+
+def same_track(a: Arrival, leg: Leg) -> bool:
+    """A train on your line and platform direction, whether or not it goes where you're going."""
+    nb = numbat.get()
+    to_stop = leg.to_stop_id or (leg.stop_ids[-1] if leg.stop_ids else None)
+    way = nb.leg_direction(leg.line_id, a.stop_id or leg.from_stop_id, to_stop) if nb else None
+    bound = bound_of(a.platform)
+    return bool(way and bound and not a.terminates_here and nb.direction(way[0], way[1], bound) == way[3])
+
+
+def wait_behind(headway: float, clear_min: float) -> float:
+    """Expected wait when no train of yours is showing but other trains on your track are, the last of them
+    `clear_min` minutes away: yours is behind it. With trains every `headway` minutes and none in the next
+    clear_min, the next is on average halfway through what's left of the headway; if a whole headway has already
+    gone by, the service is running late and half a headway more is the best guess."""
+    if clear_min <= 0:
+        return headway / 2
+    return (headway + clear_min) / 2 if clear_min < headway else clear_min + headway / 2
 
 
 def disruption_starts(s: Session, source: str, statuses: dict[str, LineStatus], now: datetime) -> dict[str, datetime]:
@@ -269,7 +313,7 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
     legs: list[LegForecast] = []
     disruptions: dict[str, dict] = {}
     live_any, support, partial = False, 0, False
-    band = hour_band(depart_at)
+    band = hour_band(ctx.now)  # the model's time band is when the countdown was read, as in training
     no_new: float | None = None  # chance no new disruption starts on any Tube leg, from TfL's status history
     first_transit, board, typical = True, None, None  # how full the first train is likely to be
     trains: list[dict] = []
@@ -313,20 +357,34 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
 
                 qc = queue_context(arr)  # same context the model was trained with
                 weekend = local(ctx.now).weekday() >= 5
+                clear = None  # when the last train showing on your track gets here, whoever it's for
                 for a in arr:
-                    if a.line_id != leg.line_id or not _matches_direction(a, leg.direction):
+                    if a.line_id != leg.line_id:
                         continue
-                    rank, gap = qc.get(id(a), (None, None))
-                    age = (ctx.now - aware(a.feed_timestamp)).total_seconds() if a.feed_timestamp else None
-                    # The model was trained with the line-wide status (what the recorder stores), so give it the same
-                    # definition here; `cat` (section-aware, for this leg) still drives the engine's own adjustments.
-                    line_cat = ctx.category(a.line_id)
-                    p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, line_cat != GOOD,
-                                          category=line_cat, queue_rank=rank, gap_s=gap, feed_age_s=age,
-                                          weekend=weekend, bound=bound_of(a.platform), polled_at=ctx.now)
+                    mine = goes_your_way(a, leg)
+                    if not mine and not same_track(a, leg):
+                        continue
+                    p = ctx.predictions.get(id(a))
+                    if p is None:
+                        if a.at_platform:  # it's here: nothing to correct
+                            p = {"bias_s": 0.0, "q10_s": -10.0, "q90_s": 30.0, "support": 0}
+                        else:
+                            rank, gap = qc.get(id(a), (None, None))
+                            age = (ctx.now - aware(a.feed_timestamp)).total_seconds() if a.feed_timestamp else None
+                            # The model was trained with the line-wide status (what the recorder stores), so give it
+                            # the same definition here; `cat` (section-aware) still drives the engine's adjustments.
+                            line_cat = ctx.category(a.line_id)
+                            p = ctx.model.predict(a.line_id, a.stop_id, a.time_to_station_s, band, line_cat != GOOD,
+                                                  category=line_cat, queue_rank=rank, gap_s=gap, feed_age_s=age,
+                                                  weekend=weekend, bound=bound_of(a.platform), polled_at=ctx.now)
+                        ctx.predictions[id(a)] = p
                     when = aware(a.expected_arrival) + timedelta(seconds=p["bias_s"])
+                    if not mine:
+                        clear = when if clear is None else max(clear, when)
+                        continue
                     if a.terminates_here:
                         when += timedelta(seconds=TERMINUS_TURNAROUND_S)
+                    clear = when if clear is None else max(clear, when)
                     cands.append((when, p, a))
                 cands.sort(key=lambda c: c[0])
                 upcoming = [round((w - board_at).total_seconds() / 60, 1) for w, *_ in cands
@@ -339,6 +397,11 @@ def forecast_journey(j: Journey, ctx: NetworkContext, depart_at: datetime) -> Jo
                         wait_sd = max(0.3, (p["q90_s"] - p["q10_s"]) / 2.56 / 60)
                         live, support, basis = True, max(support, p["support"]), "live"
                         break
+                if not live and clear is not None and basis != "timetable":
+                    # Trains are showing on your track but none you can catch is yours: yours is behind them.
+                    behind = wait_behind(headway, (clear - board_at).total_seconds() / 60)
+                    if behind > wait:
+                        wait, wait_sd = behind, max(wait_sd, headway / math.sqrt(12))
         live_any |= live
         ride = leg.duration_min * (1 + p_on * (RIDE_MULT.get(impact, 1.0) - 1))
         ride_sd = ride * (RIDE_SD[GOOD] + p_on * (RIDE_SD.get(impact, 0.05) - RIDE_SD[GOOD]))

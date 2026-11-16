@@ -15,7 +15,7 @@ from sqlalchemy import func, insert, select, text
 from sqlalchemy.orm import Session
 
 from .db import LineStatusSnapshot, ObservedArrival, Prediction, RawSnapshot, WatchedStop
-from .domain import GOOD
+from .domain import GOOD, PLACEHOLDER_VEHICLE_IDS
 from .archive import archive_raw
 from .redact import redact
 from .providers.base import Provider
@@ -84,6 +84,12 @@ def queue_context(items) -> dict[int, tuple[int, int | None]]:
     return out
 
 
+def storable(a) -> bool:
+    """Worth storing as a prediction? Not a train that's already at the platform (the arrival has happened), nor one
+    with a placeholder id shared by other trains (it could never be paired with its own arrival). Amendment 4."""
+    return not a.at_platform and a.vehicle_id not in PLACEHOLDER_VEHICLE_IDS
+
+
 def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime, cats: dict[str, str],
                     pending: list | None = None) -> int:
     """pending: if given, the raw response is held for one batched archive write instead of the database."""
@@ -106,15 +112,16 @@ def record_arrivals(s: Session, provider: Provider, stop_id: str, now: datetime,
     s.add(raw)
     s.flush()
     qc = queue_context(res.items)
-    if res.items:
-        s.execute(insert(Prediction), [dict(
-            source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
-            stop_id=stop_id, line_id=a.line_id, mode=a.mode, direction=a.direction, vehicle_id=a.vehicle_id,
-            expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
-            line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
-            queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1],
-        ) for a in res.items])
-    return len(res.items)
+    rows = [dict(
+        source=provider.name, raw_id=raw.id, polled_at=polled, feed_ts=naive_utc(a.feed_timestamp),
+        stop_id=stop_id, line_id=a.line_id, mode=a.mode, direction=a.direction, vehicle_id=a.vehicle_id,
+        expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
+        line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
+        queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1], terminates=bool(a.terminates_here),
+    ) for a in res.items if storable(a)]
+    if rows:
+        s.execute(insert(Prediction), rows)
+    return len(rows)
 
 
 # ---------------------------------------------------------------- network-wide recording
@@ -188,9 +195,9 @@ def record_network(s: Session, provider: Provider, mode: str, now: datetime, cat
         stop_id=a.stop_id, line_id=a.line_id, mode=a.mode or mode, direction=a.direction, vehicle_id=a.vehicle_id,
         expected_arrival=naive_utc(a.expected_arrival), tts_s=a.time_to_station_s,
         line_category=cats.get(a.line_id, GOOD), platform=(a.platform or None) and a.platform[:60],
-            queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1],
+            queue_rank=qc[id(a)][0], gap_s=qc[id(a)][1], terminates=bool(a.terminates_here),
     ) for a in res.items
-        if a.time_to_station_s <= NETWORK_MAX_LEAD_S
+        if a.time_to_station_s <= NETWORK_MAX_LEAD_S and storable(a)
         and sampler.keep((a.stop_id, a.line_id, a.vehicle_id, a.direction), a.time_to_station_s, now)]
     if rows:
         s.execute(insert(Prediction), rows)
@@ -321,8 +328,18 @@ def infer_arrivals(s: Session, source: str, now: datetime, lookback: timedelta =
     return created
 
 
-def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archive=None) -> dict:
-    """Measured Tube arrivals: every train first seen 'At Platform', timed by the signalling system."""
+STILL_THERE = timedelta(minutes=3)  # seen at the same platform within this: the same visit, not a new arrival
+_AT_PLATFORM: dict[tuple, datetime] = {}  # (station, line code, set number, platform) -> last poll it was seen there
+
+
+def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archive=None,
+                      present: dict | None = None) -> dict:
+    """Measured Tube arrivals: every train first seen 'At Platform', timed by the signalling system.
+
+    A train waiting at a terminus stays 'At Platform' for many minutes and its timestamp can change while it sits
+    there; before 16 November 2026 that was recorded as a second arrival once ten minutes had passed, and the "due"
+    rows TfL kept listing for the waiting train were then paired with it (Amendment 4). Now a train still at the
+    platform it was at on a recent poll is the same visit: only its first sighting is an arrival."""
     import json
     import xml.etree.ElementTree as ET
 
@@ -335,6 +352,9 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
                                                      ObservedArrival.arrived_at >= since)):
         existing[(o.stop_id, o.line_id, o.vehicle_id, o.direction)].append(o.arrived_at)
     raws, created, unmapped, failed = {}, 0, 0, []
+    present = _AT_PLATFORM if present is None else present
+    for k in [k for k, seen in present.items() if now - seen > timedelta(hours=1)]:
+        del present[k]
     for code, line_ids in LINE_CODES.items():
         try:
             _, trains, raw = tn.summary(code)
@@ -351,9 +371,19 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
                 unmapped += 1
                 continue
             arrived = naive_utc(t.seen_since)
+            shared = t.set_no in PLACEHOLDER_VEHICLE_IDS
+            if not shared:
+                here = (naptan, code, t.set_no, t.platform)
+                last = present.get(here)
+                present[here] = now
+                if last is not None and now - last <= STILL_THERE:
+                    continue  # still waiting where it was
             for line_id in line_ids:
                 key = (naptan, line_id, t.set_no, bound_of(t.platform))
-                if any(abs((arrived - x).total_seconds()) < DEDUPE_WINDOW.total_seconds() for x in existing[key]):
+                # Unidentified trains share one id, so only the same moment is a repeat. They're kept for "when was
+                # the last train here" (fullness) and never paired with a prediction.
+                window = 60 if shared else DEDUPE_WINDOW.total_seconds()
+                if any(abs((arrived - x).total_seconds()) < window for x in existing[key]):
                     continue
                 existing[key].append(arrived)
                 s.add(ObservedArrival(source=source, stop_id=naptan, line_id=line_id, vehicle_id=t.set_no,

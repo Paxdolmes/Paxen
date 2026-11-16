@@ -82,3 +82,35 @@ def test_measured_arrival_preferred_and_direction_respected(session):
     samples = load_samples(session, "tfl")
     assert len(samples) == 1 and samples[0].error_s == 60  # measured (5:00) beats inferred (5:40)
     assert len(load_samples(session, "tfl", methods=("countdown_inferred",))) == 1
+
+
+def test_a_train_waiting_at_a_terminus_is_one_arrival_however_long_it_waits(session):
+    """Its timestamp changes while it sits there; that used to become a second 'arrival' after ten minutes."""
+    from paxen.trackernet import TrainAtPlatform
+
+    t0 = datetime(2026, 11, 3, 8, 20, 0, tzinfo=timezone.utc)
+
+    class Waiting:
+        def __init__(self):
+            self.since = t0
+
+        def summary(self, code):
+            trains = [TrainAtPlatform("V", "WAL", "Walthamstow Central", "Southbound - Platform 1", "220", "Brixton",
+                                      self.since)] if code == "V" else []
+            return None, trains, b"<ROOT/>"
+
+        def station_map(self, code, names):
+            return {"WAL": "940GZZLUWWL"}
+
+    tn, present = Waiting(), {}
+    made = 0
+    for i in range(30):  # polled every 30 s for 15 minutes; the timestamp moves on after 12 minutes
+        now = t0 + timedelta(seconds=30 * i)
+        if i == 24:
+            tn.since = now
+        made += record_trackernet(session, tn, now, source="tfl", archive=False, present=present)["measured_arrivals"]
+    assert made == 1
+    # it leaves, and the same set number is back 40 minutes later: a new arrival
+    tn.since = t0 + timedelta(minutes=55)
+    later = record_trackernet(session, tn, tn.since + timedelta(seconds=5), source="tfl", archive=False, present=present)
+    assert later["measured_arrivals"] == 1

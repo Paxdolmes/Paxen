@@ -20,15 +20,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import ModelVersion, ObservedArrival, Prediction
+from .domain import PLACEHOLDER_VEHICLE_IDS  # noqa: F401  (re-exported: evaluate and the recorder use it from here)
 from .timeutil import aware, hour_band, naive_utc
 
 LEAD_BUCKETS = [(0, 120, "0-2m"), (120, 300, "2-5m"), (300, 600, "5-10m"), (600, 1200, "10-20m"), (1200, 1e9, "20m+")]
 SHRINK_K = 25.0
 MAX_LEAD_S = 1800
+# Amendment 4: under this, TfL shows "due" and keeps listing trains that have already arrived as a few seconds away,
+# so the row can't be told from "the train is here" and can't be paired with the arrival it was about.
+MIN_LEAD_S = 30
 MEASURED = ("trackernet", "darwin")  # ground truth measured by the railway (Tube; Overground and Elizabeth line)
-# Ids TfL gives trains its systems can't identify. Different trains share them (about a third of Metropolitan line
-# listings are "000"), so they can't say which arrival a prediction was about.
-PLACEHOLDER_VEHICLE_IDS = frozenset({"000", "0", "", "None", "null"})
 
 
 def lead_bucket(lead_s: float) -> str:
@@ -87,14 +88,16 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
         select(Prediction.id, Prediction.polled_at, Prediction.line_id, Prediction.stop_id, Prediction.tts_s,
                Prediction.vehicle_id,
                Prediction.expected_arrival, Prediction.line_category, Prediction.direction, Prediction.platform,
-               Prediction.queue_rank, Prediction.gap_s, Prediction.feed_ts,
+               Prediction.queue_rank, Prediction.gap_s, Prediction.feed_ts, Prediction.terminates,
                ObservedArrival.arrived_at, ObservedArrival.quality, ObservedArrival.method, ObservedArrival.direction)
         .join(ObservedArrival, (ObservedArrival.source == Prediction.source)
               & (ObservedArrival.stop_id == Prediction.stop_id)
               & (ObservedArrival.line_id == Prediction.line_id)
               & (ObservedArrival.vehicle_id == Prediction.vehicle_id))
         .where(Prediction.source == source, ObservedArrival.quality >= min_quality,
-               Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S)
+               Prediction.polled_at <= ObservedArrival.arrived_at, Prediction.tts_s <= MAX_LEAD_S,
+               # Amendment 4: a shared placeholder id can't say which train arrived; "due" rows aren't predictions
+               Prediction.tts_s >= MIN_LEAD_S, Prediction.vehicle_id.notin_(sorted(PLACEHOLDER_VEHICLE_IDS)))
     )
     # A vehicle id recurs many times a day at the same stop, so without an upper bound on the arrival every
     # prediction pairs with every later visit of that vehicle (tens of millions of rows a day, which ran the
@@ -111,11 +114,12 @@ def load_samples(s: Session, source: str, since: datetime | None = None, min_qua
     if stride > 1:
         q = q.where(Prediction.id % stride == 0)
     best: dict[int, tuple] = {}
-    for (pid, polled, line, stop, tts, vehicle, exp, cat, p_dir, platform, rank_q, gap, feed_ts, arrived, quality,
-         method, o_dir) in s.execute(q.execution_options(yield_per=10_000)):
+    for (pid, polled, line, stop, tts, vehicle, exp, cat, p_dir, platform, rank_q, gap, feed_ts, terminates, arrived,
+         quality, method, o_dir) in s.execute(q.execution_options(yield_per=10_000)):
         if method == "trackernet":
             b = bound_of(platform)
-            if b and o_dir and b != o_dir:
+            # (at the train's terminus the platform label is arbitrary, so it isn't compared: Amendment 4)
+            if b and o_dir and b != o_dir and not terminates:
                 continue  # same train, other direction (e.g. after reversing at a terminus)
         elif not (p_dir == o_dir or (p_dir is None and o_dir is None)):
             continue
