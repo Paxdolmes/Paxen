@@ -268,13 +268,17 @@ def model_kind(source: str) -> str:
 
 def active_model(s: Session, source: str = "sim"):
     """The model the protocol promoted for this data source; with none active, no correction (TfL's numbers)."""
-    mv = s.scalars(select(ModelVersion).where(ModelVersion.kind == model_kind(source), ModelVersion.active.is_(True))
-                   .order_by(ModelVersion.id.desc())).first()
-    if not mv:
+    # Only the id: the row also holds the whole fitted model and its evaluation report, which is megabytes to pull
+    # from the database on every forecast. Those are read once, when the active version changes.
+    mv_id = s.scalars(select(ModelVersion.id).where(ModelVersion.kind == model_kind(source),
+                                                    ModelVersion.active.is_(True))
+                      .order_by(ModelVersion.id.desc())).first()
+    if mv_id is None:
         return CorrectionModel()
     cached = _cache.get(source)
-    if cached and cached[0] == mv.id:
+    if cached and cached[0] == mv_id:
         return cached[1]
+    mv = s.get(ModelVersion, mv_id)
     from .models import from_params
 
     m = from_params(mv.params)
