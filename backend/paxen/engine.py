@@ -34,6 +34,7 @@ from .domain import (
 from .forecast import CorrectionModel, active_model
 from .providers.base import Provider
 from .recorder import watch_stops
+from .timing import phase
 from .timeutil import aware, hour_band, in_window, local, minutes_of_day, naive_utc, parse_hhmm
 from .trackernet import bound_of
 
@@ -734,20 +735,28 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     """conditions: optional {"weather": ..., "air_quality": ...} from paxen.conditions; affects ranking only."""
     preference = preference or commute.preference or "balanced"
     depart_at = depart_at or default_depart_at(commute, now)
-    statuses = current_statuses(provider, now)
-    ctx = NetworkContext(provider, now, statuses, active_model(s, provider.name), feed_fresh,
-                         disruption_starts(s, provider.name, statuses, now),
-                         last_seen=crowd.last_seen_lookup(s, provider.name, now))
+    with phase("status"):
+        statuses = current_statuses(provider, now)
+    with phase("model"):
+        model = active_model(s, provider.name)
+    with phase("db"):
+        ctx = NetworkContext(provider, now, statuses, model, feed_fresh,
+                             disruption_starts(s, provider.name, statuses, now),
+                             last_seen=crowd.last_seen_lookup(s, provider.name, now))
     o, d = commute.origin, commute.dest
-    try:
-        journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
-    except Exception:
-        journeys = []
-    journeys, chosen_stops_honoured = apply_chosen_stops(provider, commute, depart_at, journeys)
+    with phase("plan"):
+        try:
+            journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
+        except Exception:
+            journeys = []
+        journeys, chosen_stops_honoured = apply_chosen_stops(provider, commute, depart_at, journeys)
     if depart_at - now <= timedelta(minutes=LIVE_HORIZON_MIN):
-        ctx.prefetch({l.from_stop_id for j in journeys for l in j.transit_legs if l.from_stop_id})
-    forecasts = [forecast_journey(j, ctx, depart_at) for j in journeys]
-    watch_stops(s, {l.from_stop_id: l.from_name for j in journeys for l in j.transit_legs if l.from_stop_id}, now)
+        with phase("arrivals"):
+            ctx.prefetch({l.from_stop_id for j in journeys for l in j.transit_legs if l.from_stop_id})
+    with phase("forecast"):
+        forecasts = [forecast_journey(j, ctx, depart_at) for j in journeys]
+    with phase("db"):
+        watch_stops(s, {l.from_stop_id: l.from_name for j in journeys for l in j.transit_legs if l.from_stop_id}, now)
 
     # Learn the usual route if we don't know it yet: most-travelled, else nominally fastest feasible option.
     if not commute.usual_signature and forecasts:

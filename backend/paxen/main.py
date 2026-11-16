@@ -11,13 +11,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import serialize as ser
+from . import timing
 from .config import settings
 from .db import Alert, BoardingReport, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
@@ -580,9 +581,14 @@ def _conditions(s, c, t, depart_at=None) -> dict:
 
 
 def _eval_dict(s, c, t, depart_at=None, preference=None, max_options=None, with_paths=False):
+    with timing.phase("db"):
+        fresh = _feed_fresh(s, t)
+    with timing.phase("conditions"):
+        cond = _conditions(s, c, t, depart_at)
     ev = evaluate_commute(s, get_provider(), c, t, depart_at=depart_at, preference=preference,
-                          feed_fresh=_feed_fresh(s, t), conditions=_conditions(s, c, t, depart_at))
-    s.commit()  # persists learned usual route + watched stops
+                          feed_fresh=fresh, conditions=cond)
+    with timing.phase("db"):
+        s.commit()  # persists learned usual route + watched stops
     return ser.evaluation(ev, t, max_options, with_paths)
 
 
@@ -609,10 +615,12 @@ def compare(commute_id: str, preference: Pref | None = None, depart_at: datetime
 
 
 @app.get("/v1/dashboard")
-def dashboard(u: User = Depends(current_user), s: Session = Depends(db)):
+def dashboard(response: Response, u: User = Depends(current_user), s: Session = Depends(db)):
     t = now()
+    phases = timing.start()
     commutes = list(s.scalars(select(Commute).where(Commute.user_id == u.id).order_by(Commute.window_start)))
-    _warm_journeys(commutes, t)
+    with timing.phase("warm"):
+        _warm_journeys(commutes, t)
     evals = [_eval_dict(s, c, t, max_options=3) for c in commutes]
     # The "current" commute: the one in its window, else the next one today, else the first.
     m = local(t).hour * 60 + local(t).minute
@@ -620,13 +628,16 @@ def dashboard(u: User = Depends(current_user), s: Session = Depends(db)):
     active = next((e for e in evals if e["active"]), None) or (upcoming[0] if upcoming else evals[0] if evals else None)
     unread = s.query(Alert).filter(Alert.user_id == u.id, Alert.read.is_(False)).count()
     p = get_provider()
-    return {
-        "generated_at": t.isoformat(), "user": ser.user(u), "provider": p.name,
-        "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t, p.name),
-        "active_commute_id": active["commute"]["id"] if active else None,
-        "commutes": evals, "network": _network(t, evals), "unread_alerts": unread,
-        "upcoming": _upcoming(evals, t),
-    }
+    with timing.phase("rest"):
+        out = {
+            "generated_at": t.isoformat(), "user": ser.user(u), "provider": p.name,
+            "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t, p.name),
+            "active_commute_id": active["commute"]["id"] if active else None,
+            "commutes": evals, "network": _network(t, evals), "unread_alerts": unread,
+            "upcoming": _upcoming(evals, t),
+        }
+    response.headers["Server-Timing"] = timing.header(phases)
+    return out
 
 
 # ------------------------------------------------------------------------ network
