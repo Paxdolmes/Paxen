@@ -85,3 +85,30 @@ impossible. Kept trips feed the personal baseline, route reliability and "trips 
 counted (shown in You). Returning to where it started drops the pending trip, and a live trip that's running is ended
 on arrival instead of being doubled. The same check now applies to live and hand-entered trips; invalid trips are
 deleted a day later. None of this touches the network arrival model or its pre-registered evaluation.
+
+## Home-screen widget and the trip on the lock screen
+
+Both come from one widget extension (`expo-widgets`; layouts in `mobile/src/widgets/`). They are **left out of the
+build unless asked for**, because they need an App Group that Apple's API cannot create.
+
+**One-off, by hand** at developer.apple.com/account > Certificates, Identifiers & Profiles > Identifiers:
+
+1. Choose **App Groups** in the filter at the top right, press **+**, and register `group.com.paxdolmes.paxen`.
+2. Back under **App IDs**, open `com.paxdolmes.paxen`, press **Configure** next to App Groups, tick the group, Save.
+3. Run the build once with **widgets** ticked (Actions > "iPhone app to TestFlight" > Run workflow). It registers
+   `com.paxdolmes.paxen.widgets`, then stops and lists these steps because that identifier has no group yet.
+4. Open `com.paxdolmes.paxen.widgets` under App IDs and tick the same group. Run the build again with widgets ticked.
+
+What they do:
+
+- **Widget ("Commute")**: when to leave for the next commute, whether it is running normally, and the route. Small
+  and medium on the home screen; rectangular and inline on the lock screen. It is refreshed whenever the app loads
+  Today. Live times are shown for 20 minutes; after that it falls back to the usual journey time, because iOS does
+  not let the app refresh it on a timer.
+- **Trip on the lock screen** (a Live Activity, also in the Dynamic Island): starts with a trip, shows the arrival
+  time, what you are doing now and the next train. The app sends its push token to `PUT /v1/trips/{id}/activity`
+  and the worker updates it once a minute (`backend/paxen/activity.py`), so it stays right with the app closed. It
+  ends when the trip does. Live Activities can be switched off per app in iOS Settings; the app works without them.
+
+Neither has been run on a phone from this repository's CI yet: the layouts compile and the server payload is
+tested, but how they look needs checking on a device.

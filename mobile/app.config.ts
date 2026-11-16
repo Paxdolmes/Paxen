@@ -3,6 +3,10 @@ import type { ConfigContext, ExpoConfig } from 'expo/config'
 
 // Paxen's iPhone app (React Native / Expo). Same bundle id as the earlier web-wrapped app, so TestFlight testers
 // simply get the new version. Native folders are generated at build time (`expo prebuild`); never edit them.
+// The widget extension (home-screen widget and the trip on the lock screen) needs an App Group that has to be
+// created once by hand in the Apple Developer account (docs/iphone-app.md), so it is only built when asked for.
+const WIDGETS = process.env.PAXEN_WIDGETS === '1'
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Paxen',
@@ -17,6 +21,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // CI passes its run number, so every TestFlight upload gets a new build number.
     buildNumber: process.env.IOS_BUILD_NUMBER || '1',
     supportsTablet: false,
+    // TestFlight and App Store builds use Apple's production push service. Stated here because the widgets plugin
+    // would otherwise leave the entitlement at "development".
+    entitlements: { 'aps-environment': 'production' },
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       NSLocationWhenInUseUsageDescription:
@@ -43,6 +50,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     '@react-native-community/datetimepicker',
+    ...(WIDGETS
+      ? ([
+          [
+            'expo-widgets',
+            {
+              bundleIdentifier: 'com.paxdolmes.paxen.widgets',
+              groupIdentifier: 'group.com.paxdolmes.paxen',
+              enablePushNotifications: true, // the server keeps the lock-screen trip up to date
+              widgets: [
+                {
+                  name: 'PaxenCommute',
+                  displayName: 'Commute',
+                  description: 'When to leave for your next commute, and whether it is running normally.',
+                  ios: {
+                    supportedFamilies: ['systemSmall', 'systemMedium', 'accessoryRectangular', 'accessoryInline'],
+                    initialLayout: './src/widgets/commute-widget.tsx',
+                  },
+                },
+              ],
+            },
+          ],
+        ] as [string, object][])
+      : []),
   ],
   experiments: { typedRoutes: false },
   extra: {

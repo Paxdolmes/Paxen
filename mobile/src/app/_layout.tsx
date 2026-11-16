@@ -8,7 +8,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { SWRConfig } from 'swr'
 import { palettes } from '@/shared/paxen-tokens'
 import { fonts } from '@/lib/fonts'
-import { revalidateAll, useToken } from '@/lib/hooks'
+import { revalidateAll, useActiveTrip, useLiveTrip, useToken } from '@/lib/hooks'
+import { endTripActivity, syncTripActivity } from '@/lib/native-surfaces'
+import { activityProps } from '@/lib/surface-data'
 import { api } from '@/lib/api'
 import { initPush } from '@/lib/push'
 import { startRecommended } from '@/lib/trip-actions'
@@ -17,6 +19,21 @@ void SplashScreen.preventAutoHideAsync().catch(() => {})
 
 // Live data refreshes on a timer while the app is in front, and straight away when you come back to it.
 const swrConfig = { isOnline: () => true, isVisible: () => AppState.currentState === 'active' }
+
+/** Keeps the trip on the lock screen (iPhone) in step with the trip in the app. Renders nothing. */
+function TripOnLockScreen() {
+  const trip = useActiveTrip()
+  const { data: live } = useLiveTrip(trip?.id ?? null, null)
+  const tripId = trip?.id ?? null
+  useEffect(() => {
+    if (!tripId) return void endTripActivity()
+    if (!live || live.trip_id !== tripId) return
+    const props = activityProps(live)
+    if (live.status === 'active') syncTripActivity(tripId, props)
+    else void endTripActivity(props)
+  }, [tripId, live])
+  return null
+}
 
 export default function RootLayout() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light'
@@ -61,6 +78,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <SWRConfig value={swrConfig}>
+        <TripOnLockScreen />
         <ThemeProvider value={theme}>
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.canvas } }}>
             <Stack.Screen name="(tabs)" />

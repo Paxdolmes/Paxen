@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import useSWR, { mutate as globalMutate } from 'swr'
 import type { Dashboard, Preference } from '@/shared/types'
 import { api, tokenStore } from './api'
+import { updateCommuteWidget } from './native-surfaces'
+import { widgetEntries } from './surface-data'
 import { persisted } from './storage'
 
 export function useToken() {
@@ -18,6 +20,7 @@ const who = (token: string | null | undefined) => (token ? token.slice(-12) : ''
 async function fetchDashboard() {
   const data = await api.dashboard()
   dashStore.set(JSON.stringify({ who: who(tokenStore.get()), at: Date.now(), data }))
+  updateCommuteWidget(widgetEntries(data)) // the home-screen widget shows the same answer
   return data
 }
 

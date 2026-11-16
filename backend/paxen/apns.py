@@ -88,3 +88,42 @@ def send(push_token: str, title: str, body: str, data: dict | None = None, categ
         return "gone"
     log.warning("APNs push failed (%s %s)", r.status_code, reason)
     return "failed"
+
+
+def send_activity(activity_token: str, name: str, props: dict, now, end: bool = False, stale_s: int = 300) -> str:
+    """Update (or end) a Live Activity on the lock screen. `props` is drawn by the activity named `name` in the app
+    (expo-widgets keeps them as a JSON string in the activity's content state). 'sent', 'gone' or 'failed'."""
+    global _client, last_error
+    last_error = None
+    if not configured():
+        last_error = "not_configured"
+        return "failed"
+    ts = int(now.timestamp())
+    aps: dict = {"timestamp": ts, "event": "end" if end else "update",
+                 "content-state": {"name": name, "props": json.dumps(props, separators=(",", ":"))}}
+    if end:
+        aps["dismissal-date"] = ts + 10 * 60  # the arrival stays on the lock screen for ten minutes
+    else:
+        aps["stale-date"] = ts + stale_s
+    host = os.getenv("APNS_HOST", "api.push.apple.com")
+    topic = os.getenv("APNS_TOPIC", "com.paxdolmes.paxen") + ".push-type.liveactivity"
+    try:
+        _client = _client or httpx.Client(http2=True, timeout=10)
+        r = _client.post(f"https://{host}/3/device/{activity_token}", json={"aps": aps}, headers={
+            "authorization": f"bearer {_token()}", "apns-topic": topic, "apns-push-type": "liveactivity",
+            # 5: doesn't count against the hourly budget iOS gives high-priority activity updates
+            "apns-priority": "10" if end else "5", "apns-expiration": str(ts + 300)})
+    except Exception as e:
+        last_error = type(e).__name__
+        return "failed"
+    if r.status_code == 200:
+        return "sent"
+    try:
+        reason = (r.json() if r.content else {}).get("reason", "")
+    except ValueError:
+        reason = ""
+    last_error = f"{r.status_code} {reason}".strip()
+    if r.status_code == 410 or reason in ("BadDeviceToken", "Unregistered", "ExpiredToken"):
+        return "gone"
+    log.warning("APNs live activity push failed (%s %s)", r.status_code, reason)
+    return "failed"

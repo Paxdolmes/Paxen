@@ -80,3 +80,43 @@ def test_not_configured_never_breaks_monitoring(monkeypatch):
     for k in ("APNS_KEY_ID", "APNS_TEAM_ID", "APNS_PRIVATE_KEY"):
         monkeypatch.delenv(k, raising=False)
     assert apns.send("apns:abcd", "t", "b") == "failed"
+
+
+def test_a_trip_on_the_lock_screen_is_kept_up_to_date_and_ended(key, monkeypatch, session):
+    from datetime import datetime, timedelta, timezone
+
+    from paxen import activity
+    from paxen.db import Trip
+
+    seen = fake_client(monkeypatch, 200)
+    now = datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc)
+    u = User(token_hash="c" * 64)
+    session.add(u)
+    session.flush()
+    trip = Trip(user_id=u.id, started_at=now.replace(tzinfo=None), status="active", activity_token="ab" * 32)
+    session.add(trip)
+    session.flush()
+    eta = now + timedelta(minutes=24)
+    live = {"status": "active", "summary": "District", "eta": eta.isoformat(), "phase": "waiting", "current_leg": 1,
+            "legs": [{"mode": "walking", "to": "Fulham Broadway"},
+                     {"mode": "tube", "line_name": "District", "from": "Fulham Broadway", "to": "Victoria"}],
+            "next_departure": {"line_name": "District", "stop": "Fulham Broadway", "catch_index": 0,
+                               "trains": [{"at": (now + timedelta(minutes=3)).isoformat()}]},
+            "disruptions": [{"line_name": "District", "description": "Minor delays"}]}
+    p = activity.props(live)
+    assert p == {"status": "active", "summary": "District", "eta": int(eta.timestamp() * 1000),
+                 "headline": "Wait for the District at Fulham Broadway", "next": "District from Fulham Broadway",
+                 "nextAt": int((now + timedelta(minutes=3)).timestamp() * 1000), "note": "District: Minor delays"}
+
+    assert activity.push_all(session, None, now, lambda s, provider, t, at: live) == 1
+    aps = seen["json"]["aps"]
+    assert seen["url"].endswith("/3/device/" + "ab" * 32) and aps["event"] == "update"
+    assert seen["headers"]["apns-topic"] == "com.paxdolmes.paxen.push-type.liveactivity"
+    assert seen["headers"]["apns-push-type"] == "liveactivity" and seen["headers"]["apns-priority"] == "5"
+    assert aps["content-state"]["name"] == "PaxenTrip" and json.loads(aps["content-state"]["props"]) == p
+    assert aps["stale-date"] == aps["timestamp"] + 300 and trip.activity_token
+
+    activity.push_all(session, None, now, lambda s, provider, t, at: {"status": "arrived", "summary": "District"})
+    aps = seen["json"]["aps"]
+    assert aps["event"] == "end" and json.loads(aps["content-state"]["props"])["headline"] == "You’ve arrived"
+    assert trip.activity_token is None  # nothing more is sent for this trip
