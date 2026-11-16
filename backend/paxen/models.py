@@ -10,12 +10,18 @@ polled_at (when the prediction was made). Unknown context is simply ignored.
 from __future__ import annotations
 
 import base64
-import io
 import statistics
 from collections import defaultdict
 from datetime import timedelta
 
 from .forecast import CorrectionModel, Sample, _quantile, lead_bucket
+
+
+def no_correction(lead_s: float, disrupted: bool) -> dict:
+    """TfL's number as it is, with a plain lead-scaled interval: for anything a model hasn't been tested on."""
+    spread = 20 + 0.08 * lead_s + (60 if disrupted else 0)
+    return {"bias_s": 0.0, "q10_s": -spread * 0.6, "q90_s": spread, "support": 0}
+
 
 SIMPLICITY = {"provider": 0, "hier": 1, "hier_ctx": 2, "gbm": 3, "gbm_numbat": 4}
 CTX_KEYS = ("category", "queue_rank", "gap_s", "feed_age_s", "weekend", "bound", "polled_at")
@@ -117,11 +123,14 @@ class GBMModel:
     MAX_STOPS = 250  # most frequent stops get their own category; the rest share one
     CATEGORICAL = [False, True, True, True, False, False, False, True, True]  # one flag per feature column
 
-    def __init__(self, models=None, lines=None, stops=None, keep=None):
+    def __init__(self, models=None, lines=None, stops=None, keep=None, trees=None):
         self.models, self.lines, self.stops = models or {}, lines or [], stops or []
         # Feature columns used: a column with no observed values (e.g. recorded before that signal existed)
         # can't be binned, so it's dropped at fit time and the same columns are used when predicting.
         self.keep = keep
+        # The same three models as plain decision trees (paxen/trees.py): what the API and the worker run, so
+        # neither has to load scikit-learn (about 95 MB each). `models` only exists where the model was fitted.
+        self.trees = trees or {}
 
     def _row(self, line, stop, lead_s, band, disrupted, category=None, queue_rank=None, gap_s=None,
              feed_age_s=None, weekend=None, **_):
@@ -171,20 +180,30 @@ class GBMModel:
             m.models[name] = est.fit(X, y)
         return m
 
-    def predict(self, line, stop, lead_s, band, disrupted, **ctx) -> dict:
-        import numpy as np
+    def _packed(self) -> dict:
+        if not self.trees and self.models:
+            from . import trees
 
-        row = np.array([self._ctx_row(line, stop, lead_s, band, disrupted, ctx)], dtype=float)
+            self.trees = {n: trees.Trees(trees.pack(est)) for n, est in self.models.items()}
+        return self.trees
+
+    def predict(self, line, stop, lead_s, band, disrupted, **ctx) -> dict:
+        row = self._ctx_row(line, stop, lead_s, band, disrupted, ctx)
         if self.keep is not None:
-            row = row[:, self.keep]
-        q10, q50, q90 = (float(self.models[n].predict(row)[0]) for n in ("q10", "q50", "q90"))
+            row = [row[i] for i in self.keep]
+        t = self._packed()
+        q10, q50, q90 = (t[n].predict(row) for n in ("q10", "q50", "q90"))
         return {"bias_s": q50, "q10_s": min(q10, q50), "q90_s": max(q90, q50), "support": 1}
 
     def predict_many(self, samples: list[Sample]) -> list[dict]:
-        import numpy as np
-
         if not samples:
             return []
+        if not self.models:  # loaded from storage: no scikit-learn here
+            return [self.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, category=x.category,
+                                 queue_rank=x.queue_rank, gap_s=x.gap_s, feed_age_s=x.feed_age_s, weekend=x.weekend,
+                                 bound=x.bound, polled_at=x.polled_at) for x in samples]
+        import numpy as np
+
         X = np.array([self._sample_row(x) for x in samples], dtype=float)
         if self.keep is not None:
             X = X[:, self.keep]
@@ -193,16 +212,20 @@ class GBMModel:
                 for a, b, c in zip(q["q10"], q["q50"], q["q90"])]
 
     def to_params(self) -> dict:
-        import pickle
+        from . import trees
 
-        buf = io.BytesIO()
-        pickle.dump(self.models, buf)
         return {"model": self.kind, "lines": self.lines, "stops": self.stops, "keep": self.keep,
-                "blob": base64.b64encode(buf.getvalue()).decode()}
+                "trees": {n: trees.dumps(trees.pack(est)) for n, est in self.models.items()} if self.models
+                else {}}
 
     @classmethod
     def from_params(cls, p: dict) -> "GBMModel":
-        import pickle
+        if p.get("trees"):
+            from . import trees
+
+            return cls(None, p.get("lines", []), p.get("stops", []), p.get("keep"),
+                       {n: trees.Trees.loads(blob) for n, blob in p["trees"].items()})
+        import pickle  # models stored before 16 November 2026 (the library's own format)
 
         return cls(pickle.loads(base64.b64decode(p["blob"])), p.get("lines", []), p.get("stops", []), p.get("keep"))
 
@@ -267,8 +290,15 @@ class Conformal:
     day; per-bucket quantile Q_b (pooled fallback for small buckets). Serve: base refitted on all training days,
     interval [q10 - Q_b, q90 + Q_b]. Point predictions are the base model's, unchanged."""
 
-    def __init__(self, base, q: dict[str, float], kind: str):
+    def __init__(self, base, q: dict[str, float], kind: str, lines: list[str] | None = None):
         self.base, self.q, self.kind = base, q, kind
+        # The lines the model was fitted and tested on. Anything else (buses, a line with no measured arrivals)
+        # gets TfL's number uncorrected: a correction is only as good as the evidence for it. None: not recorded
+        # (models stored before 16 November 2026), so the base model's own list is used when it has one.
+        self.lines = lines if lines is not None else (list(getattr(base, "lines", None) or []) or None)
+
+    def in_scope(self, line: str | None) -> bool:
+        return self.lines is None or line in self.lines
 
     @classmethod
     def fit_with(cls, base_cls, samples: list[Sample]) -> "Conformal | object":
@@ -284,7 +314,7 @@ class Conformal:
             scores[lead_bucket(x.lead_s)].append(sc)
             scores["*"].append(sc)
         q = {b: conformal_quantile(v) for b, v in scores.items() if b == "*" or len(v) >= MIN_BUCKET_SCORES}
-        return cls(base_cls.fit(samples), q, base_cls.kind)
+        return cls(base_cls.fit(samples), q, base_cls.kind, sorted({x.line_id for x in samples}))
 
     def _widen(self, p: dict, lead_s: float) -> dict:
         qb = self.q.get(lead_bucket(lead_s), self.q.get("*", 0.0))
@@ -294,17 +324,21 @@ class Conformal:
         return {**p, "q10_s": min(lo, p["bias_s"]), "q90_s": max(hi, p["bias_s"])}
 
     def predict(self, line, stop, lead_s, band, disrupted, **ctx) -> dict:
+        if not self.in_scope(line):
+            return no_correction(lead_s, disrupted)
         return self._widen(self.base.predict(line, stop, lead_s, band, disrupted, **ctx), lead_s)
 
     def predict_many(self, samples: list[Sample]) -> list[dict]:
-        return [self._widen(p, x.lead_s) for x, p in zip(samples, _predict_all(self.base, samples))]
+        return [self._widen(p, x.lead_s) if self.in_scope(x.line_id) else no_correction(x.lead_s, x.disrupted)
+                for x, p in zip(samples, _predict_all(self.base, samples))]
 
     def to_params(self) -> dict:
-        return {"model": "conformal", "base": self.base.to_params(), "q": self.q, "kind": self.kind}
+        return {"model": "conformal", "base": self.base.to_params(), "q": self.q, "kind": self.kind,
+                "lines": self.lines}
 
     @classmethod
     def from_params(cls, p: dict) -> "Conformal":
-        return cls(from_params(p["base"]), p.get("q", {}), p.get("kind", "?"))
+        return cls(from_params(p["base"]), p.get("q", {}), p.get("kind", "?"), p.get("lines"))
 
 
 def from_params(params: dict):

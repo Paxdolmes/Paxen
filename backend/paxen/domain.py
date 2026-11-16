@@ -8,6 +8,10 @@ from datetime import datetime
 GOOD, MINOR, SEVERE, PART_SUSPENDED, SUSPENDED = "good", "minor", "severe", "part_suspended", "suspended"
 SEVERITY_ORDER = {GOOD: 0, MINOR: 1, SEVERE: 2, PART_SUSPENDED: 3, SUSPENDED: 4}
 
+# Ids TfL gives trains its systems can't identify. Different trains share them (about a third of Metropolitan line
+# listings are "000"), so they can't say which arrival a prediction was about.
+PLACEHOLDER_VEHICLE_IDS = frozenset({"000", "0", "", "None", "null"})
+
 DEFAULT_HEADWAY_MIN = {"tube": 4.0, "elizabeth-line": 5.0, "overground": 8.0, "national-rail": 10.0, "dlr": 6.0, "bus": 9.0}
 TRANSIT_MODES = set(DEFAULT_HEADWAY_MIN) | {"tram", "river-bus", "cable-car"}
 
@@ -28,6 +32,9 @@ class Arrival:
     platform: str | None = None
     # True when the vehicle terminates at this stop and will reverse to form a departure (e.g. a line's end).
     terminates_here: bool = False
+    destination_id: str | None = None  # the stop it's going to, when the feed gives one (used to tell branches apart)
+    # True when the feed says the train is already at this stop's platform: it's here, not a prediction of an arrival
+    at_platform: bool = False
 
 
 @dataclass

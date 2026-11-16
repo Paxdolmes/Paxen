@@ -1,5 +1,5 @@
 from paxen.domain import GOOD, MINOR, SEVERE, SUSPENDED
-from paxen.providers.tfl import parse_arrivals, parse_journeys, parse_statuses
+from paxen.providers.tfl import parse_arrivals, parse_journeys, parse_mode_arrivals, parse_statuses
 
 ARRIVALS = [
     {"id": "-1", "vehicleId": "241", "naptanId": "940GZZLUWWL", "stationName": "Walthamstow Central Underground Station",
@@ -85,13 +85,129 @@ def test_terminus_duplicates_collapse_and_are_flagged():
     assert a.time_to_station_s == 70 and a.terminates_here
 
 
-def test_terminating_train_counts_as_next_departure():
+def _leg(line, frm, to, direction=None):
+    from datetime import datetime, timezone
 
-    from paxen.engine import _matches_direction
+    from paxen.domain import Leg
+
+    t = datetime(2026, 11, 3, 8, 5, tzinfo=timezone.utc)
+    return Leg("tube", 10.0, "A", "B", t, t, line_id=line, line_name=line, from_stop_id=frm, to_stop_id=to,
+               direction=direction, stop_ids=[frm, to])
+
+
+def test_terminating_train_counts_as_next_departure():
+    from paxen.engine import goes_your_way
+
     [a] = parse_arrivals(TERMINUS, "940GZZLUWWL")
-    assert _matches_direction(a, "Brixton Underground Station")
+    assert goes_your_way(a, _leg("victoria", "940GZZLUWWL", "940GZZLUOXC", "Brixton Underground Station"))
     [b] = parse_arrivals(ARRIVALS[:1], "940GZZLUWWL")
     assert not b.terminates_here
+
+
+def _row(vehicle, platform, tts, dest_id=None, dest="", stop="940GZZLUFBY", line="district", loc="", **kw):
+    return {"vehicleId": vehicle, "naptanId": stop, "lineId": line, "lineName": line.title(), "modeName": "tube",
+            "platformName": platform, "timeToStation": tts, "destinationNaptanId": dest_id, "destinationName": dest,
+            "currentLocation": loc, "expectedArrival": "2026-11-03T08:10:00Z", "timestamp": "2026-11-03T08:05:00Z",
+            **kw}
+
+
+def test_a_trains_way_out_and_way_back_are_both_kept():
+    """Farringdon, 16 Nov 2026: Metropolitan train 450 is due eastbound in 28 s and, after turning round at Aldgate,
+    westbound in 19 minutes. They are different calls; the old rule kept only the first."""
+    rows = [_row("450", "Eastbound - Platform 1", 28, "940GZZLUALD", "Aldgate Underground Station",
+                 stop="940GZZLUFCN", line="metropolitan"),
+            _row("450", "Westbound - Platform 2", 1139, None, "", stop="940GZZLUFCN", line="metropolitan")]
+    out = parse_arrivals(rows, "940GZZLUFCN")
+    assert [(a.platform, a.time_to_station_s, a.destination_id) for a in out] == [
+        ("Eastbound - Platform 1", 28, "940GZZLUALD"), ("Westbound - Platform 2", 1139, None)]
+
+
+def test_alternative_platforms_in_one_direction_are_one_train():
+    rows = [_row("402", "Southbound Fast - Platform 6", 57, "940GZZLUALD", stop="940GZZLUHOH", line="metropolitan"),
+            _row("402", "Southbound - Platform 5", 87, "940GZZLUALD", stop="940GZZLUHOH", line="metropolitan")]
+    [a] = parse_arrivals(rows, "940GZZLUHOH")
+    assert a.time_to_station_s == 57
+
+
+def test_unidentified_trains_sharing_an_id_stay_separate():
+    """Uxbridge: three different trains with the placeholder id 000, each listed on three platforms."""
+    ux = "940GZZLUUXB"
+    rows = [_row("000", f"Eastbound - Platform {p}", t, ux, "Uxbridge Underground Station", stop=ux,
+                 line="metropolitan") for t in (489, 729, 849) for p in (1, 2, 4)]
+    rows += [_row("000", "Westbound - Platform 1", t, ux, "Uxbridge", stop="940GZZLUICK", line="metropolitan")
+             for t in (189, 369, 549)]  # Ickenham: three trains towards Uxbridge
+    rows += [_row("000", "Eastbound - Platform 2", 190, None, "", stop="940GZZLUICK", line="metropolitan")]
+    out = parse_mode_arrivals(rows)
+    assert sorted(a.time_to_station_s for a in out if a.stop_id == ux) == [489, 729, 849]
+    assert all(a.terminates_here for a in out if a.stop_id == ux)
+    ick = sorted((a.time_to_station_s, a.platform) for a in out if a.stop_id == "940GZZLUICK")
+    assert ick == [(189, "Westbound - Platform 1"), (190, "Eastbound - Platform 2"),
+                   (369, "Westbound - Platform 1"), (549, "Westbound - Platform 1")]
+
+
+def test_a_train_at_the_platform_is_flagged():
+    here, coming = parse_arrivals([_row("101", "Eastbound - Platform 2", 12, "940GZZLUUPM", loc="At Platform"),
+                                   _row("102", "Eastbound - Platform 2", 180, "940GZZLUUPM",
+                                        loc="At Parsons Green Platform 1")], "940GZZLUFBY")
+    assert here.at_platform and not coming.at_platform
+
+
+def test_trains_are_matched_by_where_they_go_not_by_one_destination_name():
+    """Fulham Broadway to Victoria. TfL's planner says "Upminster" (the train it happened to pick), but Barking and
+    Tower Hill trains call at Victoria too; Edgware Road trains leave the same platform and don't."""
+    from paxen.engine import goes_your_way, same_track
+
+    leg = _leg("district", "940GZZLUFBY", "940GZZLUVIC", "Upminster")
+
+    def train(dest_id, dest, platform="Eastbound - Platform 2", **kw):
+        [a] = parse_arrivals([_row("070", platform, 200, dest_id, dest, **kw)], "940GZZLUFBY")
+        return a
+
+    assert goes_your_way(train("940GZZLUUPM", "Upminster Underground Station"), leg)
+    assert goes_your_way(train("940GZZLUBKG", "Barking Underground Station"), leg)
+    assert goes_your_way(train("940GZZLUTWH", "Tower Hill Underground Station"), leg)
+    edgware = train("940GZZLUERC", "Edgware Road (Circle Line) Underground Station")
+    assert not goes_your_way(edgware, leg) and same_track(edgware, leg)  # not yours, but ahead of yours
+    wimbledon = train("940GZZLUWIM", "Wimbledon Underground Station", "Westbound - Platform 1")
+    assert not goes_your_way(wimbledon, leg) and not same_track(wimbledon, leg)
+    assert not goes_your_way(train("940GZZLUSSQ", "Sloane Square Underground Station"), leg)  # stops short
+    # no destination given (a train's return trip): not claimed where the line branches before your stop...
+    assert not goes_your_way(train(None, ""), leg)
+    # ...but fine where every eastbound train passes your stop, and never from the wrong platform
+    to_earls_court = _leg("district", "940GZZLUFBY", "940GZZLUECT", "Upminster")
+    assert goes_your_way(train(None, ""), to_earls_court) and goes_your_way(edgware, to_earls_court)
+    assert not goes_your_way(train(None, "", "Westbound - Platform 1"), to_earls_court)
+
+
+def test_a_train_terminating_mid_line_is_not_your_next_departure():
+    from paxen.engine import goes_your_way
+
+    [a] = parse_arrivals([_row("055", "Eastbound - Platform 2", 90, "940GZZLUTWH", "Tower Hill Underground Station",
+                               stop="940GZZLUTWH")], "940GZZLUTWH")
+    assert a.terminates_here
+    assert not goes_your_way(a, _leg("district", "940GZZLUTWH", "940GZZLUUPM", "Upminster"))
+
+
+def test_off_the_map_falls_back_to_names():
+    from paxen.domain import Arrival
+    from paxen.engine import goes_your_way
+
+    def bus(dest):
+        t = _leg("25", "490A", "490B").departure
+        return Arrival("LX1", "490A", "Stop A", "25", "25", "bus", dest, dest, t, 120, t)
+
+    leg = _leg("25", "490A", "490B", "City Thameslink")
+    leg.mode = "bus"
+    assert goes_your_way(bus("City Thameslink"), leg) and not goes_your_way(bus("Ilford"), leg)
+    assert not goes_your_way(bus(""), leg)  # an empty destination used to match everything
+
+
+def test_wait_when_only_other_trains_are_showing():
+    from paxen.engine import wait_behind
+
+    assert wait_behind(8.0, 0) == 4.0  # nothing on your track: the usual half a headway
+    assert wait_behind(8.0, 3.0) == 5.5  # yours is behind a train 3 minutes away
+    assert wait_behind(8.0, 11.0) == 15.0  # a whole headway has gone by without one of yours
 
 
 def test_journeys_deduplicated_by_route():

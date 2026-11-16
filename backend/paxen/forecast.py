@@ -20,15 +20,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import ModelVersion, ObservedArrival, Prediction
+from .domain import PLACEHOLDER_VEHICLE_IDS  # noqa: F401  (re-exported: evaluate and the recorder use it from here)
 from .timeutil import aware, hour_band, naive_utc
 
 LEAD_BUCKETS = [(0, 120, "0-2m"), (120, 300, "2-5m"), (300, 600, "5-10m"), (600, 1200, "10-20m"), (1200, 1e9, "20m+")]
 SHRINK_K = 25.0
 MAX_LEAD_S = 1800
 MEASURED = ("trackernet", "darwin")  # ground truth measured by the railway (Tube; Overground and Elizabeth line)
-# Ids TfL gives trains its systems can't identify. Different trains share them (about a third of Metropolitan line
-# listings are "000"), so they can't say which arrival a prediction was about.
-PLACEHOLDER_VEHICLE_IDS = frozenset({"000", "0", "", "None", "null"})
 
 
 def lead_bucket(lead_s: float) -> str:

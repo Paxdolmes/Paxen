@@ -156,6 +156,7 @@ class Numbat:
                 code, d = name.split("|")
                 self.headings[(key, code)][d] = float(deg)
         self._stop_context = lru_cache(maxsize=200_000)(self._stop_context_uncached)
+        self._reach_cache: dict[tuple, frozenset[str]] = {}
 
     # ------------------------------------------------------------------ lookups
     def key_of(self, line_id: str | None) -> str | None:
@@ -238,6 +239,79 @@ class Numbat:
             if _angle(dirs[best], BOUND_DEG[bound]) <= MAX_BEARING_MISMATCH:
                 return best
         return None
+
+    # ------------------------------------------------------------------ which trains go where
+    def _reach(self, key: str, start: str, d: str, avoid: str | None = None) -> frozenset[str]:
+        """Every station a train at `start` travelling in direction d can still call at (without reversing: it only
+        follows links in direction d). With `avoid`, the stations it can reach without passing through that one."""
+        k = (key, start, d, avoid)
+        hit = self._reach_cache.get(k)
+        if hit is None:
+            seen, frontier = set(), [start]
+            while frontier:
+                nxt = []
+                for node in frontier:
+                    for to in self.adj.get((key, node), ()):
+                        if to not in seen and to != avoid and to != start and self.links[(key, node, to)][0] == d:
+                            seen.add(to)
+                            nxt.append(to)
+                frontier = nxt
+            hit = self._reach_cache[k] = frozenset(seen)
+        return hit
+
+    def leg_direction(self, line_id: str | None, from_stop: str | None, to_stop: str | None) -> tuple[str, str, str, str] | None:
+        """(line key, boarding station, alighting station, direction of travel) for a journey leg, or None when the
+        line isn't in NUMBAT, a stop isn't on it, or no train runs from one to the other without reversing."""
+        key = self.key_of(line_id)
+        a, b = (self.code_of(key, from_stop), self.code_of(key, to_stop)) if key else (None, None)
+        if not a or not b or a == b:
+            return None
+        ways = [d for d in sorted({self.links[(key, a, x)][0] for x in self.adj.get((key, a), ())})
+                if b in self._reach(key, a, d)]
+        return (key, a, b, ways[0]) if len(ways) == 1 else None  # two ways round a loop: can't tell which
+
+    def serves(self, line_id: str | None, from_stop: str | None, to_stop: str | None, dest_stop: str | None,
+               bound: str | None = None) -> bool | None:
+        """Does a train at `from_stop` call at `to_stop`? Judged from where the train is going (`dest_stop`, a NaPTAN
+        id) on NUMBAT's map of the line: yes if its destination is the alighting stop or beyond it, no if it stops
+        short, heads the other way or turns onto another branch. When the destination isn't known, the platform's
+        `bound` decides, but only where every train in that direction passes the alighting stop.
+        None when it can't be told from the map (line not covered, loops, two routes to the same destination)."""
+        leg = self.leg_direction(line_id, from_stop, to_stop)
+        if not leg:
+            return None
+        key, a, b, d = leg
+        way = self.direction(key, a, bound) if bound else None
+        if way and way != d:
+            return False  # the platform faces the other way
+        dest = self.code_of(key, dest_stop) if dest_stop else None
+        if dest:
+            if dest == b:
+                return True
+            if dest == a:
+                return None  # it terminates where you board: the caller knows what that means there
+            via, around = dest in self._reach(key, b, d), dest in self._reach(key, a, d, avoid=b)
+            if via and around:
+                return None  # e.g. the Northern line's two branches through central London
+            return via
+        if way == d:
+            # no destination given (TfL omits it for a train's return trip): fine if nothing branches off before b
+            beyond = self._reach(key, a, d)
+            return True if beyond <= (self._reach(key, b, d) | self._between(key, a, b, d) | {b}) else None
+        return None
+
+    def _between(self, key: str, a: str, b: str, d: str) -> frozenset[str]:
+        """Stations a train can call at after a and before b, in direction d."""
+        return frozenset(x for x in self._reach(key, a, d) if b in self._reach(key, x, d))
+
+    def starts_here(self, line_id: str | None, stop_id: str | None, to_stop: str | None) -> bool | None:
+        """True when trains towards `to_stop` begin their trip at `stop_id` (the end of the line in that direction),
+        so a train terminating there is the one that forms the next departure. None when the map can't say."""
+        leg = self.leg_direction(line_id, stop_id, to_stop)
+        if not leg:
+            return None
+        key, a, _, d = leg
+        return not any(x for x, _ in self.feeds.get((key, a, d), ()))
 
     def upstream(self, line_id: str | None, stop_id: str | None, bound: str | None, when: datetime,
                  n: int = 2) -> list[str]:
@@ -335,6 +409,17 @@ def headway_min(line_id: str | None, stop_ids: list[str], when: datetime) -> flo
 def stop_context(line_id: str | None, stop_id: str | None, bound: str | None, when: datetime) -> dict | None:
     nb = get()
     return nb.stop_context(line_id, stop_id, bound, when) if nb else None
+
+
+def serves(line_id: str | None, from_stop: str | None, to_stop: str | None, dest_stop: str | None,
+           bound: str | None = None) -> bool | None:
+    nb = get()
+    return nb.serves(line_id, from_stop, to_stop, dest_stop, bound) if nb else None
+
+
+def starts_here(line_id: str | None, stop_id: str | None, to_stop: str | None) -> bool | None:
+    nb = get()
+    return nb.starts_here(line_id, stop_id, to_stop) if nb else None
 
 
 # ====================================================================== building the data file
