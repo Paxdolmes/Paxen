@@ -315,3 +315,41 @@ def test_time_bucketed_caches_stay_bounded():
     c = {i: (time.monotonic() - (1000 if i < 900 else 0), i) for i in range(1200)}
     prune(c, max_age_s=120, max_entries=500)
     assert len(c) <= 500 and all(k >= 900 for k in c)  # expired entries go first
+
+
+def test_a_recent_plan_is_served_at_once_while_a_new_one_is_fetched():
+    import threading
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    import httpx
+    from paxen.providers.tfl import ALT_MODE_SETS, TflProvider
+
+    calls, gate = [], threading.Event()
+
+    def handler(req: httpx.Request):
+        calls.append(req.url.params.get("time"))
+        if len(calls) > len(ALT_MODE_SETS):
+            gate.wait(5)  # the second round of planner calls is slow
+        return httpx.Response(200, json={"journeys": []})
+
+    p = TflProvider("https://api.tfl.gov.uk", None)
+    p.client = httpx.Client(transport=httpx.MockTransport(handler))
+    home, work = (51.4803, -0.1950), (51.4965, -0.1447)
+    t = datetime(2026, 11, 16, 8, 3, tzinfo=timezone.utc)
+    assert p.journeys(home, work, t) == [] and len(calls) == len(ALT_MODE_SETS)
+    assert p.journeys(home, work, t + timedelta(minutes=1)) == [] and len(calls) == len(ALT_MODE_SETS)  # cached
+    t0 = time.monotonic()
+    assert p.journeys(home, work, t + timedelta(minutes=3)) == []  # 08:06, a new 5-minute slot: served, not waited for
+    assert time.monotonic() - t0 < 1
+    p.journeys(home, work, t + timedelta(minutes=3))  # asked again meanwhile: no second fetch for the same slot
+    gate.set()
+    for _ in range(100):
+        if not p._planning:
+            break
+        time.sleep(0.02)
+    assert len(calls) == 2 * len(ALT_MODE_SETS) and not p._planning
+    # a plan for a much later departure is not reused
+    n = len(calls)
+    p.journeys(home, work, t + timedelta(hours=2))
+    assert len(calls) == n + len(ALT_MODE_SETS)

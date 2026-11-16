@@ -102,6 +102,34 @@ def test_the_journey_forecast_says_which_train_to_wait_for():
 
 
 @needs_data
+def test_leave_by_is_the_latest_you_can_set_off_for_the_same_train():
+    from paxen.serialize import leave_by
+
+    class Gap:
+        """The next train is 9 minutes away; the station is a 2-minute walk."""
+        name = "tfl"
+
+        def arrivals(self, stop_id, now):
+            t = now + timedelta(minutes=9)
+            return SimpleNamespace(items=[Arrival("1", stop_id, "Fulham Broadway", "district", "District", "tube",
+                                                  "inbound", "Upminster", t, 540, now,
+                                                  platform="Eastbound - Platform 1")])
+
+    def forecast(provider):
+        walk = Leg("walking", 2.0, "Home", "Fulham Broadway", NOW, NOW + timedelta(minutes=2))
+        dis = Leg("tube", 6.0, "Fulham Broadway", "Earl's Court", NOW + timedelta(minutes=4),
+                  NOW + timedelta(minutes=10), line_id="district", line_name="District", from_stop_id=FBY,
+                  stop_ids=[FBY, "940GZZLUWBN", "940GZZLUECT"])
+        j = Journey([walk, dis], 10.0, NOW, NOW + timedelta(minutes=10), "tfl")
+        return forecast_journey(j, NetworkContext(provider, NOW, {}, CorrectionModel()), NOW)
+
+    lb = leave_by(forecast(Gap()))  # 7 minutes on the platform, less 2 to spare: leave 5 minutes later
+    assert lb["spare_min"] == 5 and lb["at"].startswith("2026-11-10T08:05") and lb["train_at"].startswith("2026-11-10T08:09")
+    assert lb["stop"] == "Fulham Broadway" and lb["line_name"] == "District" and lb["live"]
+    assert leave_by(forecast(FulhamBroadway())) is None  # a train 2 minutes after you get there: go now
+
+
+@needs_data
 def test_the_gap_is_behind_whichever_train_is_ahead_on_the_platform():
     class Branches:
         """Upminster trains at 08:04 and 08:09, and an Edgware Road train (which turns off at Earl's Court)

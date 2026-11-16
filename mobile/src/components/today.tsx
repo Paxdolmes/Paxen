@@ -7,7 +7,8 @@ import { radii } from '@/shared/paxen-tokens'
 import { crowdingWords, usuallyRange } from '@/shared/plain'
 import type { CommuteEvaluation, Conditions, LineStatus, UpcomingDisruption } from '@/shared/types'
 import { enableAutoTrips } from '@/lib/autotrips'
-import { type ActiveTrip, revalidateAll, useActiveTrip, useLiveTrip } from '@/lib/hooks'
+import { type ActiveTrip, revalidateAll, useActiveTrip, useLiveTrip, useNow } from '@/lib/hooks'
+import { leaveAdvice } from '@/lib/leave'
 import { persisted } from '@/lib/storage'
 import { usePalette } from '@/lib/theme'
 import { useStartTrip } from '@/lib/trip-actions'
@@ -54,6 +55,10 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
   const gain = evaluation.gain_min ?? (rec?.vs_usual_min != null ? -rec.vs_usual_min : null)
   const slowerBy = delta_min != null && Math.round(delta_min) > 0 ? Math.round(delta_min) : null
   const range = rec ? usuallyRange(rec.duration.p10, rec.duration.p90) : null
+  const now = useNow()
+  const leave = rec ? leaveAdvice(rec.depart_at, rec.leave_by, now) : null
+  const train = leave && leave.kind !== 'later' ? leave.train : null
+  const trainWords = train ? `the ${fmtTime(train.train_at)} ${train.line_name ?? 'service'} from ${train.stop}` : null
 
   return (
     <Card style={{ overflow: 'hidden' }}>
@@ -91,12 +96,25 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
           <>
             <View style={{ gap: 8 }}>
               <View style={{ flexDirection: 'row', gap: 16 }}>
-                <TimeBlock label="Leave by" time={fmtTime(rec.depart_at)} />
+                <TimeBlock
+                  label={leave?.kind === 'now' ? 'Leave' : 'Leave by'}
+                  time={leave?.kind === 'now' ? 'Now' : fmtTime(leave?.at ?? rec.depart_at)}
+                />
                 <TimeBlock label="Arrive about" time={fmtTime(rec.arrive_at)} />
               </View>
               <Text variant="subhead" tone="secondary" tabular>
                 {fmtMin(rec.duration.p50)} door to door{range ? ` · ${range}` : ''}
               </Text>
+              {leave?.kind === 'wait' && (
+                <Text variant="callout" tone="brand" style={{ fontWeight: '600' }} tabular>
+                  You have {fmtMin(leave.inMin)} in hand. Leave by {fmtTime(leave.at)} for {trainWords}.
+                </Text>
+              )}
+              {leave?.kind === 'now' && trainWords && (
+                <Text variant="callout" tone="brand" style={{ fontWeight: '600' }} tabular>
+                  Go now for {trainWords}.
+                </Text>
+              )}
               {slowerBy != null && (
                 <Chip tone="attention" size="md">
                   {slowerBy} min slower than usual

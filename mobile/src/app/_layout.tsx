@@ -27,7 +27,7 @@ export default function RootLayout() {
     if (token !== undefined && fontsReady) void SplashScreen.hideAsync().catch(() => {})
   }, [token, fontsReady])
 
-  useEffect(() => initPush((route) => router.push(route as never), !!token), [token])
+  useEffect(() => initPush((route) => router.push(route as never), !!token, () => void revalidateAll()), [token])
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => next === 'active' && revalidateAll())

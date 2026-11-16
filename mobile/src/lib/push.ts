@@ -33,7 +33,7 @@ export async function disablePush() {
 }
 
 /** Shows alerts while the app is open, opens the right screen when one is tapped, and keeps the token fresh. */
-export function initPush(open: (route: string) => void, signedIn: boolean) {
+export function initPush(open: (route: string) => void, signedIn: boolean, onReceive?: () => void) {
   if (Platform.OS === 'web') return () => {}
   Notifications.setNotificationHandler({
     handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
@@ -42,6 +42,8 @@ export function initPush(open: (route: string) => void, signedIn: boolean) {
     const route = routeFor((r.notification.request.content.data as { url?: string } | undefined)?.url)
     if (route) open(route)
   })
+  // An alert that arrives while the app is open: bring the screens up to date with it.
+  const got = Notifications.addNotificationReceivedListener(() => onReceive?.())
   Notifications.getLastNotificationResponseAsync()
     .then((r) => {
       const route = routeFor((r?.notification.request.content.data as { url?: string } | undefined)?.url)
@@ -52,5 +54,8 @@ export function initPush(open: (route: string) => void, signedIn: boolean) {
   if (signedIn) pushPermission()
       .then((s) => (s === 'granted' ? register() : undefined))
       .catch(() => {})
-  return () => sub.remove()
+  return () => {
+    sub.remove()
+    got.remove()
+  }
 }
