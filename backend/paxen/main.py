@@ -778,6 +778,19 @@ def trip_live(trip_id: str, lat: float | None = Query(None, ge=-90, le=90), lon:
     return live_status(s, get_provider(), t, now(), pos)
 
 
+class ActivityIn(BaseModel):
+    # the Live Activity's APNs push token (hex), or null when the activity has gone
+    token: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{32,200}$")
+
+
+@app.put("/v1/trips/{trip_id}/activity", status_code=204)
+def trip_activity(trip_id: str, body: ActivityIn, u: User = Depends(current_user), s: Session = Depends(db)):
+    """The trip is showing on the lock screen: the worker keeps it up to date through this token."""
+    t = _own(s, Trip, trip_id, u)
+    t.activity_token = body.token.lower() if body.token else None
+    s.commit()
+
+
 def _finish(t: Trip, arrived: datetime) -> None:
     dur = (arrived - aware(t.started_at)).total_seconds() / 60
     if dur <= 0 or dur > 240:

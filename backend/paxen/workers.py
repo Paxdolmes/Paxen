@@ -108,6 +108,14 @@ def monitor_tick() -> int:
         except Exception:
             log.exception("briefings failed")
             s.rollback()
+        try:
+            from .activity import push_all
+            from .live import live_status
+
+            push_all(s, provider, now, live_status)  # trips showing on a lock screen
+        except Exception:
+            log.exception("live activity updates failed")
+            s.rollback()
         for c in s.scalars(select(Commute).where(Commute.alerts_enabled.is_(True))):
             if c.user.monitoring_paused or not is_active_window(c, now):
                 continue

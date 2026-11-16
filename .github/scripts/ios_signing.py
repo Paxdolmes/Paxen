@@ -9,6 +9,11 @@ cached file is useless without that secret. (Never revoke it right after uploadi
 again while processing, and rejects the build with ITMS-90721.) A new certificate is made only if the cached one
 is missing, expired or revoked. Needs ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, TEAM_ID, BUNDLE_ID, RUNNER_TEMP,
 SIGNING_CACHE.
+
+With WIDGET_BUNDLE_ID and APP_GROUP_ID set, the widget extension (home-screen widget, trip on the lock screen) is
+signed too: its identifier is registered if needed, App Groups is switched on for both identifiers and each gets
+its own profile. One thing Apple's API cannot do is create the App Group and attach it to the identifiers; that is
+done once by hand (docs/iphone-app.md), and the script stops with those steps if it hasn't been.
 """
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ TEMP = Path(os.environ.get("RUNNER_TEMP", "/tmp"))
 STATE = TEMP / "signing-state.json"
 CACHE = Path(os.environ.get("SIGNING_CACHE", str(TEMP / "signing-cache")))
 PROFILE_NAME = "Paxen App Store CI"
+WIDGET_PROFILE_NAME = "Paxen Widgets App Store CI"
 PBXPROJ = Path(os.environ.get("PBXPROJ") or "mobile/ios/Paxen.xcodeproj/project.pbxproj")
 
 
@@ -79,25 +85,25 @@ def make_p12(cert_der: bytes, key: rsa.RSAPrivateKey, password: bytes) -> bytes:
 
 
 def patch_project(text: str, team: str, profile: str, bundle: str) -> str:
-    """Manual distribution signing for the app target's Release configuration only (Swift packages untouched)."""
-    # (?:(?!isa = ...).)*? keeps each match inside one build configuration (never runs on from Debug into Release)
-    # CocoaPods adds a baseConfigurationReference line before buildSettings, so allow lines in between.
-    pattern = re.compile(r"(\{\s*isa = XCBuildConfiguration;[^{}]*?buildSettings = \{)((?:(?!isa = XCBuildConfiguration).)*?)"
-                         r"(\};\s*name = Release;)", re.S)
+    """Manual distribution signing for the Release configuration of the target with this bundle identifier, and no
+    other (Debug, Pods and Swift packages are untouched)."""
+    # One build configuration: from its "isa" back to the "{" that opens it and on to the "};" that closes it at
+    # the same depth. Xcode writes "name = Release;" after buildSettings; generated targets may write it before.
+    block = re.compile(r"\{(?:(?!\{)[^}])*?isa = XCBuildConfiguration;.*?buildSettings = \{.*?\n\t\t\t\};.*?\n\t\t\};", re.S)
 
     def fix(m: re.Match) -> str:
-        settings = m.group(2)
-        if not re.search(rf'PRODUCT_BUNDLE_IDENTIFIER = "?{re.escape(bundle)}"?;', settings):
-            return m.group(0)
-        settings = re.sub(r"\n\s*(CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|"
-                          r"DEVELOPMENT_TEAM|\"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]\") = [^;]*;", "", settings)
+        body = m.group(0)
+        if "name = Release;" not in body or not re.search(rf'PRODUCT_BUNDLE_IDENTIFIER = "?{re.escape(bundle)}"?;', body):
+            return body
+        body = re.sub(r"\n\s*(CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|"
+                      r"DEVELOPMENT_TEAM|\"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]\") = [^;]*;", "", body)
         extra = (f'\n\t\t\t\tCODE_SIGN_STYLE = Manual;\n\t\t\t\tCODE_SIGN_IDENTITY = "Apple Distribution";'
                  f'\n\t\t\t\tDEVELOPMENT_TEAM = {team};\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "{profile}";')
-        return m.group(1) + extra + settings + m.group(3)
+        return body.replace("buildSettings = {", "buildSettings = {" + extra, 1)
 
-    out, n = pattern.subn(fix, text)
+    out = block.sub(fix, text)
     if out == text:
-        sys.exit("Couldn't find the app's Release build settings in project.pbxproj")
+        sys.exit(f"Couldn't find the Release build settings for {bundle} in project.pbxproj")
     return out
 
 
@@ -137,6 +143,58 @@ def _new_certificate() -> tuple[str, bytes]:
     return cert["id"], p12
 
 
+APP_GROUP_HELP = """
+The widget build needs the App Group "{group}", and Apple's API cannot create it. Once, at
+developer.apple.com/account > Certificates, Identifiers & Profiles > Identifiers:
+  1. Choose "App Groups" in the filter at the top right, press +, and register the group {group}
+  2. Back under "App IDs", open {app}, press Configure next to App Groups, tick the group, Save
+  3. Do the same for {widget}
+Then run this build again.
+"""
+
+
+def ensure_bundle_id(identifier: str, label: str) -> str:
+    """The App Store Connect id of an app identifier, registering it if it doesn't exist yet."""
+    found = api("GET", f"/bundleIds?filter[identifier]={identifier}&limit=20")["data"]
+    match = next((b["id"] for b in found if b["attributes"]["identifier"] == identifier), None)
+    if match:
+        return match
+    made = api("POST", "/bundleIds", {"data": {"type": "bundleIds", "attributes": {
+        "identifier": identifier, "name": label, "platform": "IOS"}}})["data"]
+    print(f"Registered the identifier {identifier}")
+    return made["id"]
+
+
+def ensure_capability(bundle_id: str, capability: str) -> None:
+    have = api("GET", f"/bundleIds/{bundle_id}/bundleIdCapabilities")["data"]
+    if any(c["attributes"]["capabilityType"] == capability for c in have):
+        return
+    api("POST", "/bundleIdCapabilities", {"data": {"type": "bundleIdCapabilities", "attributes": {
+        "capabilityType": capability}, "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle_id}}}}})
+
+
+def make_profile(name: str, bundle_id: str, cert_id: str) -> bytes:
+    """A fresh App Store profile each build (so it always has the current certificate and capabilities)."""
+    for old in api("GET", f"/profiles?filter[name]={urllib.parse.quote(name)}&limit=20")["data"]:
+        api("DELETE", f"/profiles/{old['id']}")
+    prof = api("POST", "/profiles", {"data": {"type": "profiles", "attributes": {
+        "name": name, "profileType": "IOS_APP_STORE"}, "relationships": {
+        "bundleId": {"data": {"type": "bundleIds", "id": bundle_id}},
+        "certificates": {"data": [{"type": "certificates", "id": cert_id}]}}}})["data"]
+    content = base64.b64decode(prof["attributes"]["profileContent"])
+    for d in (Path.home() / "Library/MobileDevice/Provisioning Profiles",
+              Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles"):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{prof['attributes']['uuid']}.mobileprovision").write_bytes(content)
+    return content
+
+
+def profile_has_group(content: bytes, group: str) -> bool:
+    """Whether a provisioning profile (a signed wrapper around a property list) grants this App Group."""
+    m = re.search(rb"<key>com\.apple\.security\.application-groups</key>\s*<array>(.*?)</array>", content, re.S)
+    return bool(m) and f"<string>{group}</string>".encode() in m.group(1)
+
+
 def setup() -> None:
     team, bundle = os.environ["TEAM_ID"], os.environ["BUNDLE_ID"]
     cert_id, p12_bytes = _cached_certificate() or _new_certificate()
@@ -157,23 +215,19 @@ def setup() -> None:
     state["keychain"] = keychain
     STATE.write_text(json.dumps(state))
 
-    ids = api("GET", f"/bundleIds?filter[identifier]={bundle}&limit=5")["data"]
-    bundle_id = next(b["id"] for b in ids if b["attributes"]["identifier"] == bundle)
-    # a fresh profile each build (so it always includes the current certificate and capabilities)
-    for old in api("GET", f"/profiles?filter[name]={urllib.parse.quote(PROFILE_NAME)}&limit=20")["data"]:
-        api("DELETE", f"/profiles/{old['id']}")
-    name = PROFILE_NAME
-    prof = api("POST", "/profiles", {"data": {"type": "profiles", "attributes": {
-        "name": name, "profileType": "IOS_APP_STORE"}, "relationships": {
-        "bundleId": {"data": {"type": "bundleIds", "id": bundle_id}},
-        "certificates": {"data": [{"type": "certificates", "id": cert_id}]}}}})["data"]
-    content = base64.b64decode(prof["attributes"]["profileContent"])
-    for d in (Path.home() / "Library/MobileDevice/Provisioning Profiles",
-              Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles"):
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{prof['attributes']['uuid']}.mobileprovision").write_bytes(content)
-
-    PBXPROJ.write_text(patch_project(PBXPROJ.read_text(), team, name, bundle))
+    widget, group = os.environ.get("WIDGET_BUNDLE_ID"), os.environ.get("APP_GROUP_ID")
+    targets = [(bundle, PROFILE_NAME, "Paxen")] + ([(widget, WIDGET_PROFILE_NAME, "Paxen widgets")] if widget else [])
+    project = PBXPROJ.read_text()
+    for identifier, name, label in targets:
+        bundle_id = ensure_bundle_id(identifier, label)
+        if widget:
+            ensure_capability(bundle_id, "APP_GROUPS")
+        content = make_profile(name, bundle_id, cert_id)
+        if widget and group and not profile_has_group(content, group):
+            sys.exit(APP_GROUP_HELP.format(group=group, app=bundle, widget=widget))
+        project = patch_project(project, team, name, identifier)
+    PBXPROJ.write_text(project)
+    profiles = "".join(f"<key>{i}</key><string>{n}</string>" for i, n, _ in targets)
     (TEMP / "export.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -182,10 +236,11 @@ def setup() -> None:
   <key>teamID</key><string>{team}</string>
   <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
-  <key>provisioningProfiles</key><dict><key>{bundle}</key><string>{name}</string></dict>
+  <key>provisioningProfiles</key><dict>{profiles}</dict>
 </dict></plist>
 """)
-    print(f"Signing ready: certificate {cert_id}, profile '{name}'")
+    name = ", ".join(n for _, n, _ in targets)
+    print(f"Signing ready: certificate {cert_id}, profiles: {name}")
 
 
 def cleanup() -> None:

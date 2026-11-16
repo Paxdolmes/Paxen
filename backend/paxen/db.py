@@ -109,6 +109,8 @@ class Trip(Base):
     plan: Mapped[dict | None] = mapped_column(JSON)
     # active | arrived | pending (detected departure) | too_fast | too_slow | auto_closed (invalid: see live.INVALID)
     status: Mapped[str | None] = mapped_column(String(20))
+    # the lock-screen Live Activity's push token for this trip, while one is showing (paxen/activity.py)
+    activity_token: Mapped[str | None] = mapped_column(String(255))
 
 
 class Alert(Base):
@@ -344,6 +346,7 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("commutes", "briefing_at", "VARCHAR(5)"),
                   ("users", "away_date", "VARCHAR(10)"),
                   ("commutes", "avoid_lines", "JSON"),
+                  ("trips", "activity_token", "VARCHAR(255)"),
                   ("commutes", "step_free", "BOOLEAN DEFAULT FALSE"),
                   ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE"),
                   ("predictions", "terminates", "BOOLEAN")]

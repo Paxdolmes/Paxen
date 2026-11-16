@@ -157,6 +157,8 @@ export const api = {
   searchPlaces: (q: string) => request<PlaceSearchResult[]>('POST', '/v1/places/search', { q }),
   tripLive: (id: string, pos?: { lat: number; lon: number } | null) =>
     request<LiveTrip>('POST', `/v1/trips/${id}/live`, pos ? { lat: pos.lat, lon: pos.lon } : {}),
+  /** The trip is showing on the lock screen: the server keeps it up to date through this token (null: it has gone). */
+  tripActivity: (id: string, token: string | null) => request<unknown>('PUT', `/v1/trips/${id}/activity`, { token }),
   cancelTrip: (id: string) => request<unknown>('DELETE', `/v1/trips/${id}`),
   nearbyStops: (lat: number, lon: number) => request<NearbyStop[]>('POST', '/v1/places/nearby-stops', { lat, lon }),
   places: () => request<Place[]>('GET', '/v1/places'),

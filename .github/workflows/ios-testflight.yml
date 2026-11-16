@@ -5,6 +5,11 @@ name: iPhone app to TestFlight
 
 on:
   workflow_dispatch:
+    inputs:
+      widgets:
+        description: "Include the home-screen widget and lock-screen trip (needs the App Group: docs/iphone-app.md)"
+        type: boolean
+        default: false
 
 concurrency: testflight
 
@@ -20,6 +25,8 @@ jobs:
       EXPO_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
       IOS_BUILD_NUMBER: ${{ github.run_number }}
       EXPO_NO_TELEMETRY: "1"
+      # the widget extension is only generated (expo prebuild) and signed when asked for
+      PAXEN_WIDGETS: ${{ inputs.widgets && '1' || '0' }}
     defaults:
       run:
         working-directory: mobile
@@ -67,6 +74,8 @@ jobs:
           SIGNING_CACHE: ${{ github.workspace }}/.signing-cache
           ASC_KEY_PATH: ${{ runner.temp }}/keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           BUNDLE_ID: com.paxdolmes.paxen
+          WIDGET_BUNDLE_ID: ${{ inputs.widgets && 'com.paxdolmes.paxen.widgets' || '' }}
+          APP_GROUP_ID: group.com.paxdolmes.paxen
           PBXPROJ: mobile/ios/Paxen.xcodeproj/project.pbxproj
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"

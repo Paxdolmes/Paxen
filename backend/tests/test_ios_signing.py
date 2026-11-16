@@ -33,3 +33,34 @@ def test_only_the_app_release_configuration_is_signed():
     assert configs(out) == {("Debug", True): False, ("Release", True): True, ("Debug", False): False,
                             ("Release", False): False}
     assert out.count('PROVISIONING_PROFILE_SPECIFIER = "Paxen App Store CI";') == 1
+
+
+def test_the_widget_target_gets_its_own_profile_in_a_real_project():
+    """Against the project `expo prebuild` generates with the widget extension (quoted values, name before isa)."""
+    widget = """\t\t93FD /* Release */ = {
+\t\t\tname = Release;
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {
+\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "com.paxdolmes.paxen.widgets";
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = "ExpoWidgetsTarget/ExpoWidgetsTarget.entitlements";
+\t\t\t};
+\t\t};
+"""
+    app = '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "com.paxdolmes.paxen";\n'
+    text = BLOCK.format(id="A2", name="Release", bundle=app, base="") + widget
+    out = ios_signing.patch_project(text, "TEAM123", "Paxen App Store CI", "com.paxdolmes.paxen")
+    out = ios_signing.patch_project(out, "TEAM123", "Paxen Widgets App Store CI", "com.paxdolmes.paxen.widgets")
+    assert out.count('PROVISIONING_PROFILE_SPECIFIER = "Paxen App Store CI";') == 1
+    assert out.count('PROVISIONING_PROFILE_SPECIFIER = "Paxen Widgets App Store CI";') == 1
+    w = out[out.index("93FD"):]
+    assert 'PROVISIONING_PROFILE_SPECIFIER = "Paxen Widgets App Store CI";' in w and "CODE_SIGN_STYLE = Manual" in w
+
+
+def test_a_profile_without_the_app_group_is_noticed():
+    with_group = (b"junk<key>com.apple.security.application-groups</key>\n<array>\n"
+                  b"<string>group.com.paxdolmes.paxen</string></array>junk")
+    assert ios_signing.profile_has_group(with_group, "group.com.paxdolmes.paxen")
+    assert not ios_signing.profile_has_group(with_group, "group.other")
+    empty = b"<key>com.apple.security.application-groups</key><array/>"
+    assert not ios_signing.profile_has_group(empty, "group.com.paxdolmes.paxen")
+    assert not ios_signing.profile_has_group(b"<key>aps-environment</key>", "group.com.paxdolmes.paxen")
