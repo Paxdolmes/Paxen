@@ -289,7 +289,7 @@ class SimProvider:
         return FetchResult(items=out, raw=raw, endpoint="sim:/Line/Status")
 
     # ---- journey planning ---------------------------------------------------------
-    def journeys(self, origin, dest, depart_at, max_options: int = 5) -> list[Journey]:
+    def journeys(self, origin, dest, depart_at, max_options: int = 5, *, step_free: bool = False) -> list[Journey]:
         dis = self.disruptions(depart_at)
         banned_all = {lid for lid, c in dis.items() if c == SUSPENDED}
         results: list = []

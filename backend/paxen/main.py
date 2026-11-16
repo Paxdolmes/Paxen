@@ -9,7 +9,7 @@ import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +24,7 @@ from .db import Alert, BoardingReport, Commute, Place, SessionLocal, Trip, User,
 from .domain import SEVERITY_ORDER
 from .engine import (
     clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
-    set_usual,
+    set_usual, uses_line,
 )
 from .insights import insights as build_insights
 from .notify import deliver
@@ -167,6 +167,8 @@ class CommutePatch(BaseModel):
     preference: Pref | None = None
     alerts_enabled: bool | None = None
     briefing_at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # null turns it off
+    avoid_lines: list[Annotated[str, Field(max_length=40)]] | None = Field(default=None, max_length=12)
+    step_free: bool | None = None
 
 
 class Window(BaseModel):
@@ -529,8 +531,14 @@ def create_commute(body: CommuteIn, u: User = Depends(current_user), s: Session 
 @app.patch("/v1/commutes/{commute_id}")
 def patch_commute(commute_id: str, body: CommutePatch, u: User = Depends(current_user), s: Session = Depends(db)):
     c = _own(s, Commute, commute_id, u)
-    for k, v in body.model_dump(exclude_unset=True).items():
+    patch = body.model_dump(exclude_unset=True)
+    if patch.get("step_free") is None:
+        patch.pop("step_free", None)
+    for k, v in patch.items():
         setattr(c, k, v)
+    # The usual route can't be one that's now ruled out: forget it and it's learned again from what remains.
+    if uses_line(c.usual_signature, c.avoid_lines) or ("step_free" in patch and patch["step_free"]):
+        c.usual_signature = c.usual_summary = c.usual_nominal_min = None
     s.commit()
     return ser.commute(c)
 
@@ -562,11 +570,12 @@ def _warm_journeys(commutes: list[Commute], t: datetime) -> None:
         return
     p = get_provider()
     # Read everything from the database here: the session is not thread-safe, so worker threads only get plain values.
-    jobs = [((c.origin.lat, c.origin.lon), (c.dest.lat, c.dest.lon), default_depart_at(c, t)) for c in commutes]
+    jobs = [((c.origin.lat, c.origin.lon), (c.dest.lat, c.dest.lon), default_depart_at(c, t), bool(c.step_free))
+            for c in commutes]
 
     def plan(job):
         try:
-            p.journeys(*job)
+            p.journeys(*job[:3], step_free=job[3])
         except Exception:
             pass  # evaluation will retry and report unavailability properly
 

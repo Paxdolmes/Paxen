@@ -96,3 +96,35 @@ def test_interchange_listed_once():
          "distance": 720, "modes": ["overground"], "lines": [{"name": "Weaver"}], "hubNaptanCode": "HUBWHC"},
     ]}, "station")
     assert len(out) == 1 and out[0].lines == ["Victoria", "Weaver"] and out[0].modes == ["overground", "tube"]
+
+
+def test_avoided_lines_are_left_out_and_the_usual_route_is_relearned():
+    from fastapi.testclient import TestClient
+
+    import paxen.main as main
+    from paxen.engine import clear_status_cache, uses_line, without_avoided
+    from paxen.providers import get_provider
+
+    get_provider().scenario = "normal"
+    clear_status_cache()
+    js = get_provider().journeys(HOME, WORK, MORNING)
+    kept, ok = without_avoided(js, ["victoria"])
+    assert ok and kept and all("victoria" not in {l.line_id for l in j.transit_legs} for j in kept)
+    every = sorted({l.line_id for j in js for l in j.transit_legs})
+    assert without_avoided(js, every) == (js, False)  # nothing left: shown anyway, and flagged
+    assert uses_line("tube:victoria>bus:25", ["25"]) and not uses_line("tube:victoria", ["central"])
+
+    with TestClient(main.app) as c:
+        c.headers["Authorization"] = "Bearer " + c.post("/v1/users").json()["token"]
+        cid = c.post("/v1/onboarding", json={
+            "home": {"label": "home", "name": "Orford Road", "lat": HOME[0], "lon": HOME[1]},
+            "work": {"label": "work", "name": "Regent Street", "lat": WORK[0], "lon": WORK[1]}}).json()["commutes"][0]["id"]
+        before = c.get(f"/v1/commutes/{cid}/compare").json()
+        assert before["avoid_honoured"] is True and "Victoria" in before["usual"]["summary"]
+        got = c.patch(f"/v1/commutes/{cid}", json={"avoid_lines": ["victoria"], "step_free": True}).json()
+        assert got["avoid_lines"] == ["victoria"] and got["step_free"] is True and got["usual_signature"] is None
+        after = c.get(f"/v1/commutes/{cid}/compare").json()
+        assert after["options"] and all(l["line_id"] != "victoria" for o in after["options"] for l in o["legs"])
+        assert "Victoria" not in after["usual"]["summary"]
+        later = c.get(f"/v1/commutes/{cid}/compare", params={"depart_at": "2030-01-07T09:30:00+00:00"}).json()
+        assert later["depart_at"].startswith("2030-01-07T09:30") and later["options"]  # "what if I leave at 09:30?"

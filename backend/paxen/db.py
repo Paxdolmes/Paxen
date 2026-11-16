@@ -81,6 +81,8 @@ class Commute(Base):
     alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # daily briefing push at this London time (HH:MM) on the commute's days; None: off (paxen/briefing.py)
     briefing_at: Mapped[str | None] = mapped_column(String(5))
+    avoid_lines: Mapped[list | None] = mapped_column(JSON)  # line ids never to be routed on ("district", "25")
+    step_free: Mapped[bool] = mapped_column(Boolean, default=False)  # only plan step-free routes
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     user = relationship("User", back_populates="commutes")
     origin = relationship("Place", foreign_keys=[origin_id])
@@ -341,6 +343,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("users", "auto_trip_stats", "JSON"),
                   ("commutes", "briefing_at", "VARCHAR(5)"),
                   ("users", "away_date", "VARCHAR(10)"),
+                  ("commutes", "avoid_lines", "JSON"),
+                  ("commutes", "step_free", "BOOLEAN DEFAULT FALSE"),
                   ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE"),
                   ("predictions", "terminates", "BOOLEAN")]
 

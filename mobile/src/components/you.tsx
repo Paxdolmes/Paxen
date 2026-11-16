@@ -7,7 +7,7 @@ import { DAY_LABELS, fmtDays, fmtMin, fmtPct, PREFERENCE_LABELS, PREFERENCES } f
 import { radii } from '@/shared/paxen-tokens'
 import type { AutoTripStats, ChosenStop, Commute, Dashboard, Insights, Place, PlaceSearchResult, Preference, User } from '@/shared/types'
 import { api, tokenStore } from '@/lib/api'
-import { activeTripStore, revalidateAll, useInsights, useScenarios } from '@/lib/hooks'
+import { activeTripStore, revalidateAll, useDashboard, useInsights, useScenarios } from '@/lib/hooks'
 import { autoTripsPermission, disableAutoTrips, enableAutoTrips, syncGeofences } from '@/lib/autotrips'
 import { disablePush, enablePush, pushPermission, type PushPermission } from '@/lib/push'
 import { usePalette } from '@/lib/theme'
@@ -103,6 +103,12 @@ function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => 
   const [end, setEnd] = useState(commute.window_end)
   const [pref, setPref] = useState<Preference>(commute.preference)
   const [briefing, setBriefing] = useState<string | null>(commute.briefing_at ?? null)
+  const [stepFree, setStepFree] = useState(!!commute.step_free)
+  const [avoid, setAvoid] = useState<string[]>(commute.avoid_lines ?? [])
+  const { data: dashboard } = useDashboard()
+  // Lines you can rule out: TfL's rail lines (National Rail operators and bus routes would make the list endless).
+  const lines = (dashboard?.network ?? []).filter((l) => ['tube', 'overground', 'elizabeth-line', 'dlr', 'tram'].includes(l.mode))
+  const toggleAvoid = (id: string) => setAvoid((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const invalid = days.length === 0 || start >= end
@@ -110,7 +116,15 @@ function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => 
     setSaving(true)
     setError(null)
     try {
-      await api.patchCommute(commute.id, { days, window_start: start, window_end: end, preference: pref, briefing_at: briefing })
+      await api.patchCommute(commute.id, {
+        days,
+        window_start: start,
+        window_end: end,
+        preference: pref,
+        briefing_at: briefing,
+        avoid_lines: avoid,
+        step_free: stepFree,
+      })
       await revalidateAll()
       onClose()
     } catch (e) {
@@ -159,6 +173,32 @@ function CommuteEditor({ commute, onClose }: { commute: Commute; onClose: () => 
             </View>
           )}
         </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="callout">Step-free routes only</Text>
+            <Text variant="footnote" tone="secondary">
+              No stairs or escalators between the street and the platform. There may be fewer routes, and they can take longer.
+            </Text>
+          </View>
+          <Switch checked={stepFree} onChange={setStepFree} label={`Step-free routes only for ${commute.name}`} />
+        </View>
+        {lines.length > 0 && (
+          <View style={{ gap: 8 }}>
+            <View style={{ gap: 2 }}>
+              <Text variant="callout">Lines to avoid</Text>
+              <Text variant="footnote" tone="secondary">
+                {avoid.length ? 'Routes on these lines are left out, unless nothing else is running.' : 'Tap any line you never want to be routed on.'}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {lines.map((l) => (
+                <ChoiceChip key={l.line_id} selected={avoid.includes(l.line_id)} onPress={() => toggleAvoid(l.line_id)}>
+                  {l.line_name}
+                </ChoiceChip>
+              ))}
+            </View>
+          </View>
+        )}
         {invalid && (
           <Text variant="footnote" tone="watch">
             Pick at least one day and a window that ends after it starts.

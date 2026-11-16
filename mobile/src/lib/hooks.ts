@@ -55,8 +55,8 @@ export function useNow(everyMs = 20_000) {
   return now
 }
 
-export function useCompare(commuteId: string | null | undefined, preference: Preference | undefined) {
-  return useSWR(commuteId ? ['compare', commuteId, preference ?? ''] : null, () => api.compare(commuteId!, preference), {
+export function useCompare(commuteId: string | null | undefined, preference: Preference | undefined, departAt?: string | null) {
+  return useSWR(commuteId ? ['compare', commuteId, preference ?? '', departAt ?? ''] : null, () => api.compare(commuteId!, preference, departAt), {
     ...swrOpts,
     refreshInterval: 60_000,
     keepPreviousData: true,

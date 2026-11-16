@@ -166,13 +166,15 @@ export const api = {
   commutes: () => request<Commute[]>('GET', '/v1/commutes'),
   patchCommute: (
     id: string,
-    patch: Partial<Pick<Commute, 'days' | 'window_start' | 'window_end' | 'preference' | 'alerts_enabled' | 'briefing_at'>>,
+    patch: Partial<Pick<Commute, 'days' | 'window_start' | 'window_end' | 'preference' | 'alerts_enabled' | 'briefing_at' | 'avoid_lines' | 'step_free'>>,
   ) => request<Commute>('PATCH', `/v1/commutes/${id}`, patch),
-  compare: (id: string, preference?: Preference) =>
-    request<CommuteEvaluation>(
-      'GET',
-      `/v1/commutes/${id}/compare${preference ? `?preference=${encodeURIComponent(preference)}` : ''}`,
-    ),
+  /** departAt: plan for a later departure ("what if I leave at 08:30?") instead of now. */
+  compare: (id: string, preference?: Preference, departAt?: string | null) => {
+    const q = [preference ? `preference=${encodeURIComponent(preference)}` : '', departAt ? `depart_at=${encodeURIComponent(departAt)}` : '']
+      .filter(Boolean)
+      .join('&')
+    return request<CommuteEvaluation>('GET', `/v1/commutes/${id}/compare${q ? `?${q}` : ''}`)
+  },
   setUsual: (id: string, signature: string) => request<Commute>('PUT', `/v1/commutes/${id}/usual`, { signature }),
 
   dashboard: () => request<Dashboard>('GET', '/v1/dashboard'),
