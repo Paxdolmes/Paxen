@@ -19,7 +19,8 @@ def place(p: Place) -> dict:
 def commute(c: Commute) -> dict:
     return {"id": c.id, "name": c.name, "origin": place(c.origin), "dest": place(c.dest), "days": c.days,
             "window_start": c.window_start, "window_end": c.window_end, "preference": c.preference,
-            "alerts_enabled": c.alerts_enabled, "briefing_at": c.briefing_at, "usual_summary": c.usual_summary,
+            "alerts_enabled": c.alerts_enabled, "briefing_at": c.briefing_at,
+            "avoid_lines": c.avoid_lines or [], "step_free": bool(c.step_free), "usual_summary": c.usual_summary,
             "usual_signature": c.usual_signature}
 
 
@@ -114,6 +115,7 @@ def evaluation(ev: CommuteEvaluation, now, max_options: int | None = None, with_
         "gain_min": ev.gain_min,
         "preference": ev.preference,
         "chosen_stops_honoured": ev.chosen_stops_honoured,
+        "avoid_honoured": ev.avoid_honoured,
         "conditions": ev.conditions,
         "baseline": ev.baseline,
         "usual": option(ev.usual, ev, with_paths) if ev.usual else None,

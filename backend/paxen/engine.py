@@ -668,6 +668,7 @@ class CommuteEvaluation:
     preference: str
     chosen_stops_honoured: bool = True
     conditions: dict | None = None
+    avoid_honoured: bool = True  # False: every route found uses a line the person asked to avoid, so they're shown
 
 
 def _fmt_min(x: float) -> str:
@@ -726,6 +727,21 @@ def _with_walk(j: Journey, walk: float, place_name: str, stop_name: str, at_star
     return Journey(j.legs + [leg], round(j.duration_min + walk, 1), j.departure, arr, j.source)
 
 
+def without_avoided(journeys: list[Journey], avoid: list | None) -> tuple[list[Journey], bool]:
+    """Drop routes that use a line the person never wants. If that would leave nothing, keep them all and say so:
+    a route they dislike beats no route. Returns (journeys, honoured)."""
+    banned = set(avoid or [])
+    if not banned or not journeys:
+        return journeys, True
+    kept = [j for j in journeys if not banned & {l.line_id for l in j.transit_legs}]
+    return (kept, True) if kept else (journeys, False)
+
+
+def uses_line(signature: str | None, lines: list | None) -> bool:
+    """Whether a route signature ("tube:victoria>bus:25") runs on any of these lines."""
+    return bool(signature and lines) and bool({p.split(":")[-1] for p in route_key(signature).split(">")} & set(lines))
+
+
 def apply_chosen_stops(provider: Provider, commute: Commute, depart_at: datetime,
                        journeys: list[Journey]) -> tuple[list[Journey], bool]:
     """Keep journeys that start and end at the user's chosen stations. If a chosen station isn't in the planner's
@@ -741,14 +757,16 @@ def apply_chosen_stops(provider: Provider, commute: Commute, depart_at: datetime
     for p in [p for p in o_prefs if _norm(p["name"]) not in covered_o][:MAX_EXTRA_PLANS]:
         walk = float(p.get("walk_min") or 5)
         try:
-            for j in provider.journeys((p["lat"], p["lon"]), (d.lat, d.lon), depart_at + timedelta(minutes=walk)):
+            for j in provider.journeys((p["lat"], p["lon"]), (d.lat, d.lon), depart_at + timedelta(minutes=walk),
+                                       step_free=bool(commute.step_free)):
                 extra.append(_with_walk(j, walk, o.name, p["name"], at_start=True))
         except Exception:
             continue
     for p in [p for p in d_prefs if _norm(p["name"]) not in covered_d][:MAX_EXTRA_PLANS]:
         walk = float(p.get("walk_min") or 5)
         try:
-            for j in provider.journeys((o.lat, o.lon), (p["lat"], p["lon"]), depart_at):
+            for j in provider.journeys((o.lat, o.lon), (p["lat"], p["lon"]), depart_at,
+                                       step_free=bool(commute.step_free)):
                 extra.append(_with_walk(j, walk, d.name, p["name"], at_start=False))
         except Exception:
             continue
@@ -780,10 +798,11 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
     o, d = commute.origin, commute.dest
     with phase("plan"):
         try:
-            journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at)
+            journeys = provider.journeys((o.lat, o.lon), (d.lat, d.lon), depart_at, step_free=bool(commute.step_free))
         except Exception:
             journeys = []
         journeys, chosen_stops_honoured = apply_chosen_stops(provider, commute, depart_at, journeys)
+        journeys, avoid_honoured = without_avoided(journeys, commute.avoid_lines)
     if depart_at - now <= timedelta(minutes=LIVE_HORIZON_MIN):
         with phase("arrivals"):
             ctx.prefetch({l.from_stop_id for j in journeys for l in j.transit_legs if l.from_stop_id})
@@ -861,7 +880,7 @@ def evaluate_commute(s: Session, provider: Provider, commute: Commute, now: date
             status = "normal"
             detail += f" The {recommended.journey.summary} is {_fmt_min(gain)} quicker today."
     return CommuteEvaluation(commute, depart_at, baseline, usual, ranked, recommended, status, delta, gain,
-                             headline, detail, preference, chosen_stops_honoured, conditions)
+                             headline, detail, preference, chosen_stops_honoured, conditions, avoid_honoured)
 
 
 def set_usual(commute: Commute, j: Journey) -> None:

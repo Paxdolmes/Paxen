@@ -57,6 +57,8 @@ export interface Commute {
   // daily briefing push at this London time (HH:MM) on the commute's days: how today compares with normal and
   // whether to stick to the usual route. null: off
   briefing_at?: string | null
+  avoid_lines?: string[] // line ids never to be routed on
+  step_free?: boolean // only plan step-free routes
   usual_summary: string | null // "Victoria"
   usual_signature: string | null
 }
@@ -179,6 +181,7 @@ export interface CommuteEvaluation {
   gain_min: number | null // minutes saved by the recommended route vs usual
   preference: Preference
   chosen_stops_honoured: boolean // false: nothing runs via the user's chosen stations right now; all routes shown
+  avoid_honoured?: boolean // false: every route found uses a line the person avoids, so they're shown anyway
   conditions?: Conditions | null
   baseline: Baseline
   usual: RouteOption | null

@@ -411,9 +411,9 @@ class TflProvider:
         data, raw, status, latency = self._get(path, {"detail": "true"})
         return FetchResult(parse_statuses(data), raw, path, status, latency)
 
-    def journeys(self, origin, dest, depart_at):
+    def journeys(self, origin, dest, depart_at, *, step_free: bool = False):
         loc = depart_at.astimezone(LONDON)
-        od = (round(origin[0], 4), round(origin[1], 4), round(dest[0], 4), round(dest[1], 4))
+        od = (round(origin[0], 4), round(origin[1], 4), round(dest[0], 4), round(dest[1], 4), step_free)
         key = od + (loc.strftime("%Y%m%d%H") + str(loc.minute // 5),)
         hit = self._journey_cache.get(key)
         if hit and time.monotonic() - hit[0] < JOURNEY_CACHE_S:
@@ -447,6 +447,8 @@ class TflProvider:
         path = f"/Journey/JourneyResults/{origin[0]:.5f},{origin[1]:.5f}/to/{dest[0]:.5f},{dest[1]:.5f}"
         params = {"date": loc.strftime("%Y%m%d"), "time": loc.strftime("%H%M"), "timeIs": "Departing",
                   "journeyPreference": "LeastTime", "alternativeRoute": "true"}
+        if od[4]:  # step-free: no stairs or escalators between the street and the platform
+            params["accessibilityPreference"] = "StepFreeToPlatform"
         with ThreadPoolExecutor(max_workers=len(ALT_MODE_SETS)) as pool:
             futures = [pool.submit(self._get, path, {**params, "mode": m}) for m in ALT_MODE_SETS]
         found: list[Journey] = []

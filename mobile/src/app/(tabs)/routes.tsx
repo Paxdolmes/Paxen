@@ -1,18 +1,20 @@
 import { useMemo, useState } from 'react'
-import { View } from 'react-native'
+import { ScrollView, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { mutate } from 'swr'
-import { fmtMin, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
+import { fmtMin, fmtTime, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
 import type { Preference } from '@/shared/types'
 import { api } from '@/lib/api'
 import { tap } from '@/lib/haptics'
 import { useActiveTrip, useCompare, useDashboard } from '@/lib/hooks'
+import { departAtFor, type LeaveChoice, nextQuarter } from '@/lib/leave-at'
 import { useStartTrip } from '@/lib/trip-actions'
 import { OptionCard } from '@/components/option-card'
 import { Screen } from '@/components/screen'
 import { Text } from '@/components/text'
 import { AxisLabels, buildAxis, CommuteStatusPill } from '@/components/transit'
-import { Card, ErrorState, ErrorText, Segmented, Skeleton } from '@/components/ui'
+import { TimeField } from '@/components/controls'
+import { Card, ChoiceChip, ErrorState, ErrorText, Segmented, Skeleton } from '@/components/ui'
 
 export default function RoutesScreen() {
   const params = useLocalSearchParams<{ commute?: string; pref?: Preference }>()
@@ -23,7 +25,11 @@ export default function RoutesScreen() {
   const base = commutes.find((c) => c.commute.id === commuteId)
   const pref: Preference = (params.pref && PREFERENCES.includes(params.pref) ? params.pref : undefined) ?? base?.commute.preference ?? 'balanced'
 
-  const { data, error, isLoading, mutate: refetch } = useCompare(commuteId, pref)
+  // "What if I leave at 08:30?": plan for a later departure. The time is fixed when chosen, so it doesn't creep.
+  const [leave, setLeave] = useState<{ choice: LeaveChoice; departAt: string | null }>({ choice: { kind: 'now' }, departAt: null })
+  const choose = (choice: LeaveChoice) => setLeave({ choice, departAt: departAtFor(choice, new Date()) })
+  const planning = leave.departAt != null
+  const { data, error, isLoading, mutate: refetch } = useCompare(commuteId, pref, leave.departAt)
   const { start, pending, error: startError } = useStartTrip()
   const activeTrip = useActiveTrip()
   const [savingUsual, setSavingUsual] = useState<string | null>(null)
@@ -69,6 +75,36 @@ export default function RoutesScreen() {
             onChange={(p) => router.setParams({ commute: commuteId ?? '', pref: p })}
           />
 
+          <View style={{ gap: 8 }}>
+            <Text variant="caption" tone="secondary" style={{ paddingHorizontal: 4 }}>
+              Leaving
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} accessibilityLabel="When you're leaving">
+              <ChoiceChip selected={leave.choice.kind === 'now'} onPress={() => choose({ kind: 'now' })}>
+                Now
+              </ChoiceChip>
+              {[15, 30, 60].map((min) => (
+                <ChoiceChip key={min} selected={leave.choice.kind === 'in' && leave.choice.min === min} onPress={() => choose({ kind: 'in', min })}>
+                  {min === 60 ? 'In 1 h' : `In ${min} min`}
+                </ChoiceChip>
+              ))}
+              <ChoiceChip selected={leave.choice.kind === 'at'} onPress={() => choose({ kind: 'at', hhmm: nextQuarter(new Date()) })}>
+                At a time
+              </ChoiceChip>
+            </ScrollView>
+            {leave.choice.kind === 'at' && (
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TimeField label="Leave at" value={leave.choice.hhmm} onChange={(hhmm) => choose({ kind: 'at', hhmm })} />
+                <View style={{ flex: 1 }} />
+              </View>
+            )}
+            {planning && (
+              <Text variant="footnote" tone="secondary" style={{ paddingHorizontal: 4 }} tabular>
+                Planning for {fmtTime(leave.departAt)}. More than 25 minutes ahead, times use the usual service pattern, not live trains.
+              </Text>
+            )}
+          </View>
+
           {data && (
             <View style={{ gap: 4, paddingHorizontal: 4 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -81,6 +117,11 @@ export default function RoutesScreen() {
               {data.chosen_stops_honoured === false && (
                 <Text variant="footnote" tone="watch">
                   Nothing is running from your chosen stations right now, so these routes use other stations.
+                </Text>
+              )}
+              {data.avoid_honoured === false && (
+                <Text variant="footnote" tone="watch">
+                  Every route found uses a line you avoid, so they&apos;re shown anyway.
                 </Text>
               )}
               <Text variant="footnote" tone="secondary" tabular>
@@ -112,7 +153,7 @@ export default function RoutesScreen() {
                   key={o.id}
                   option={o}
                   axis={axis}
-                  canStart={!activeTrip}
+                  canStart={!activeTrip && !planning}
                   starting={pending === o.id}
                   savingUsual={savingUsual === o.id}
                   onStart={async () => {

@@ -14,7 +14,8 @@ class Provider(Protocol):
     def line_statuses(self, now: datetime, line_ids: list[str] | None = None) -> FetchResult: ...
 
     def journeys(
-        self, origin: tuple[float, float], dest: tuple[float, float], depart_at: datetime
+        self, origin: tuple[float, float], dest: tuple[float, float], depart_at: datetime, *,
+        step_free: bool = False
     ) -> list[Journey]: ...
 
     def search_places(self, query: str) -> list[PlaceResult]: ...
