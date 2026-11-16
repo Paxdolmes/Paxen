@@ -182,3 +182,55 @@ three days by lead time, by seconds-to-arrival under two minutes, by line, for t
 nothing; it exists to show whether predictions are being paired with the arrival they were about. The full stored
 report is readable at `GET /v1/model/report`.
 
+---
+
+## Amendment 4 (16 November 2026, **after** results had been seen; a correction to pairing, re-run from scratch)
+
+This amendment was written after five test days had been reported, so it is held to a stricter standard than the
+earlier ones: it changes only *which prediction/arrival pairs count*, each change follows from how TfL's feed works
+(checked against the live feed) rather than from any candidate's score, and everything is re-run from scratch.
+Candidates, features, thresholds and the decision rule are unchanged.
+
+**What the audit showed (13-15 November, 75,000 pairs, TfL's raw errors, no model):**
+
+| Pairs | Share | Median error | Over 5 minutes out |
+|---|---|---|---|
+| Listed as 0-15 s away | 4.7% | +228 s | 43% |
+| Listed as 60-120 s away | 28.8% | -5 s | 3.4% |
+| Shared placeholder train id ("000") | 2.3% | +630 s | 75% |
+| Waterloo & City, under 2 minutes | 0.2% | +778 s | 69% |
+
+A train TfL says is seconds away doesn't arrive four minutes later. These are wrong pairs, and the rule in this
+file ("the same train, same direction") was not being met:
+
+**A4.1 Trains already at the platform.** TfL keeps listing a train that has arrived as a few seconds away for as
+long as it sits there (minutes at a terminus). Such a row was made after the arrival it describes, so it was paired
+with a *later* one. Predictions with under **30 seconds** to go are no longer paired (`MIN_LEAD_S`); below that TfL
+shows "due" and the row can't be told from "the train is here". Going forward the recorder doesn't store a row TfL
+marks "At Platform" at all.
+
+**A4.2 One arrival per visit.** Trackernet's timestamp for a waiting train can change while it waits; after ten
+minutes that was recorded as a second arrival, which the "due" rows then paired with. A train still at the platform
+it was at on a recent poll is now the same visit.
+
+**A4.3 Shared train ids.** About a third of Metropolitan line listings carry the id "000" (trains TfL's systems
+can't identify). Different trains share it, so it can't identify "the same train". Those predictions are no longer
+paired or stored.
+
+**A4.4 Platform labels at a terminus.** TfL lists an arriving train on every platform it might use, and the
+platforms can carry different direction labels (Bank's Waterloo & City platforms are "Eastbound" and "Westbound").
+For a train ending its trip at that stop (now recorded as `terminates`), the platform's direction label is no longer
+compared with the arrival's.
+
+**Effect on the numbers.** TfL's own error was overstated by these pairs, and so was every candidate's apparent gain
+on them (a model can "learn" that a train waiting at Uxbridge is ten minutes late). The first run after this
+amendment reports both on clean pairs, with the audit alongside; whichever candidate then passes the unchanged rules
+is served, and if none does, Paxen shows TfL's numbers.
+
+**Serving (not part of the protocol, recorded here for completeness):**
+- A model now corrects only the lines it was fitted and tested on (the Tube). Before, the Tube model's average
+  correction was also applied to buses, the Overground, the DLR and the Elizabeth line, which no test covered.
+- A train already at the platform gets no correction.
+- The fitted trees are stored as plain data and evaluated without scikit-learn (`paxen/trees.py`); tests check the
+  served numbers equal the evaluated ones exactly.
+

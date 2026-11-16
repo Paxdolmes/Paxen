@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .db import DaySample, ModelVersion, ObservedArrival, Prediction
-from .forecast import MAX_LEAD_S, PLACEHOLDER_VEHICLE_IDS, Sample, lead_bucket, load_samples, model_kind
+from .forecast import MAX_LEAD_S, MIN_LEAD_S, PLACEHOLDER_VEHICLE_IDS, Sample, lead_bucket, load_samples, model_kind
 from .models import CANDIDATES, SIMPLICITY, Conformal
 from .timeutil import LONDON, aware, naive_utc
 
@@ -365,7 +365,9 @@ def trim_arrivals(s: Session, source: str, max_days: int = THIN_DAYS_PER_RUN, pa
             for stop, line, veh, polled in s.execute(
                     select(Prediction.stop_id, Prediction.line_id, Prediction.vehicle_id, Prediction.polled_at)
                     .where(Prediction.source == source, Prediction.polled_at >= a - PAIR_WINDOW,
-                           Prediction.polled_at < b, Prediction.tts_s <= MAX_LEAD_S)):
+                           Prediction.polled_at < b, Prediction.tts_s <= MAX_LEAD_S,
+                           Prediction.tts_s >= MIN_LEAD_S,
+                           Prediction.vehicle_id.notin_(sorted(PLACEHOLDER_VEHICLE_IDS)))):
                 seen[(stop, line, veh)].append(polled)
             for v in seen.values():
                 v.sort()

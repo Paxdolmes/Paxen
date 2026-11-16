@@ -164,6 +164,9 @@ class Prediction(Base):
     # at this stop/platform (1 = next), and seconds behind the train ahead of it.
     queue_rank: Mapped[int | None] = mapped_column(Integer)
     gap_s: Mapped[int | None] = mapped_column(Integer)
+    # The train ends its trip at this stop. At a terminus TfL lists it on every platform it might use, so the
+    # platform recorded here (and its direction label) is arbitrary. None: recorded before 16 November 2026.
+    terminates: Mapped[bool | None] = mapped_column(Boolean)
     # (An index on source, stop, line, vehicle, polled_at was dropped on 9 Nov 2026: 1.3 GB, slowing every insert,
     # and only used by the 6-hourly evaluation join, which works without it.)
     __table_args__ = (Index("ix_pred_polled", "polled_at"),)
@@ -335,7 +338,8 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("users", "auto_trips", "BOOLEAN DEFAULT FALSE"),
                   ("users", "auto_trip_stats", "JSON"),
                   ("commutes", "briefing_at", "VARCHAR(5)"),
-                  ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE")]
+                  ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE"),
+                  ("predictions", "terminates", "BOOLEAN")]
 
 
 # Indexes added after a table existed (create_all doesn't add indexes to existing tables).

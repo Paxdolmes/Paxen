@@ -516,3 +516,71 @@ def test_audit_separates_wrong_pairs_from_bad_predictions():
     assert a["worst_stops_under_2m"][0] == {"stop": "940GZZLUALD", "line": "metropolitan", "over_5m": 20, "n": 20}
     assert a["under_2m_by_line"]["victoria"]["over_5m"] == 0.0
     assert ev.audit([]) == {}
+
+
+# --------------------------------------------------------------------------- Amendment 4: pairs that aren't pairs
+
+def test_due_rows_and_shared_ids_are_never_paired(session):
+    from paxen.db import ObservedArrival, Prediction
+    from paxen.forecast import load_samples
+
+    t = datetime(2026, 11, 10, 8, 0)
+
+    def pred(vehicle, tts, platform="Eastbound - Platform 1", terminates=None, stop="S"):
+        session.add(Prediction(source="tfl", polled_at=t, stop_id=stop, line_id="district", mode="tube",
+                               direction="Upminster", vehicle_id=vehicle, expected_arrival=t + timedelta(seconds=tts),
+                               tts_s=tts, platform=platform, terminates=terminates))
+
+    def arrival(vehicle, after_s, direction="eastbound", stop="S"):
+        at = t + timedelta(seconds=after_s)
+        session.add(ObservedArrival(source="tfl", stop_id=stop, line_id="district", vehicle_id=vehicle,
+                                    direction=direction, arrived_at=at, earliest=at, latest=at, method="trackernet",
+                                    quality=1.0))
+
+    pred("101", 90); arrival("101", 100)          # a real prediction: paired
+    pred("102", 10); arrival("102", 600)          # "due" while waiting at the platform: not a prediction
+    pred("000", 90); arrival("000", 700)          # placeholder id shared by other trains
+    pred("103", 120, "Eastbound - Platform 8", terminates=True, stop="BANK")
+    arrival("103", 130, "westbound", stop="BANK")  # terminus: it came in on the other platform
+    pred("104", 120, "Eastbound - Platform 8", stop="BANK"); arrival("104", 130, "westbound", stop="BANK")  # not flagged
+    session.commit()
+    got = {x.event.split("|")[2]: x.error_s for x in load_samples(session, "tfl")}
+    assert got == {"101": 10.0, "103": 10.0}
+
+
+def test_recorder_does_not_store_trains_already_here_or_unidentified():
+    from paxen.domain import Arrival
+    from paxen.recorder import storable
+
+    t = datetime(2026, 11, 10, 8, 0, tzinfo=timezone.utc)
+    a = lambda vid, **kw: Arrival(vid, "S", "S", "district", "District", "tube", "Upminster", "Upminster", t, 60, t, **kw)  # noqa: E731
+    assert storable(a("101")) and not storable(a("101", at_platform=True)) and not storable(a("000"))
+
+
+def test_stored_model_gives_the_same_numbers_without_the_library():
+    """What was evaluated (scikit-learn, in the training process) is exactly what's served (plain trees)."""
+    import json
+    import subprocess
+    import sys
+
+    from paxen.models import Conformal, from_params
+
+    train, test = synth(4, bias=True, seed=5), synth(1, bias=True, seed=6)
+    fitted = Conformal.fit_with(GBMModel, train)
+    params = json.loads(json.dumps(fitted.to_params()))
+    assert "blob" not in params["base"] and set(params["base"]["trees"]) == {"q10", "q50", "q90"}
+    served = from_params(params)
+    for a, b in zip(fitted.predict_many(test), served.predict_many(test)):
+        assert a == b
+    x = test[0]
+    one = served.predict(x.line_id, x.stop_id, x.lead_s, x.band, x.disrupted, queue_rank=x.queue_rank, gap_s=x.gap_s,
+                         feed_age_s=x.feed_age_s, weekend=x.weekend, category=x.category)
+    assert one == fitted.predict_many([x])[0]
+    # a line it never saw (a bus route, the Overground) gets TfL's number as it is
+    off = served.predict("mildmay", "910GX", 300, "am_peak", False)
+    assert off["bias_s"] == 0.0 and off["support"] == 0
+    # loading and using it doesn't import scikit-learn
+    code = ("import json,sys; from paxen.models import from_params; m=from_params(json.load(sys.stdin)); "
+            "m.predict('victoria','victoria-s1',300,'interpeak',False); print('sklearn' in sys.modules, 'numpy' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], input=json.dumps(params), capture_output=True, text=True)
+    assert out.stdout.strip() == "False False", out.stderr[-500:]
