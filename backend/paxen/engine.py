@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -56,17 +57,45 @@ PREFERENCES = ("balanced", "fastest", "reliable", "least_walking", "fewest_chang
 _status_cache: dict[str, tuple[float, dict[str, LineStatus]]] = {}
 
 
-def current_statuses(provider: Provider, now: datetime, max_age_s: float = 60) -> dict[str, LineStatus]:
-    key = f"{provider.name}:{getattr(provider, 'scenario', '')}"
+STATUS_STALE_S = 180  # statuses this old are still served, while a fresh set is fetched in the background
+_status_refreshing: set[str] = set()
+_status_lock = threading.Lock()
+
+
+def _fetch_statuses(provider: Provider, now: datetime, key: str) -> dict[str, LineStatus]:
     hit = _status_cache.get(key)
-    if hit and time.monotonic() - hit[0] < max_age_s:
-        return hit[1]
     try:
         statuses = {s.line_id: s for s in provider.line_statuses(now).items}
     except Exception:
         statuses = hit[1] if hit else {}
     _status_cache[key] = (time.monotonic(), statuses)
     return statuses
+
+
+def current_statuses(provider: Provider, now: datetime, max_age_s: float = 60) -> dict[str, LineStatus]:
+    """Line statuses, shared by every request for a minute. TfL takes 1-2 s to answer, so once they are a minute
+    old the next request still gets them at once and a background fetch replaces them (the simulator answers
+    instantly and is always asked directly)."""
+    key = f"{provider.name}:{getattr(provider, 'scenario', '')}"
+    hit = _status_cache.get(key)
+    age = time.monotonic() - hit[0] if hit else None
+    if age is not None and age < max_age_s:
+        return hit[1]
+    if age is None or age >= STATUS_STALE_S or provider.name == "sim":
+        return _fetch_statuses(provider, now, key)
+    with _status_lock:
+        start = key not in _status_refreshing
+        _status_refreshing.add(key)
+    if start:
+        def run():
+            try:
+                _fetch_statuses(provider, now, key)
+            finally:
+                with _status_lock:
+                    _status_refreshing.discard(key)
+
+        threading.Thread(target=run, name="line-status", daemon=True).start()
+    return hit[1]
 
 
 def clear_status_cache() -> None:
@@ -611,6 +640,11 @@ def default_depart_at(commute: Commute, now: datetime) -> datetime:
     return now
 
 
+def away_today(user: User, now: datetime) -> bool:
+    """The person said they're not commuting today (User.away_date): nothing is sent until tomorrow."""
+    return bool(user.away_date) and user.away_date == local(now).date().isoformat()
+
+
 def is_active_window(commute: Commute, now: datetime, lead_min: int = 45) -> bool:
     if local(now).weekday() not in (commute.days or []):
         return False
@@ -845,7 +879,7 @@ def maybe_alert(s: Session, ev: CommuteEvaluation, now: datetime, force: bool = 
     """force=True skips the time-window, quiet-hours and cooldown checks (used by the demo 'check now' action)."""
     c, u = ev.commute, ev.commute.user
     if not force:
-        if not c.alerts_enabled or u.monitoring_paused or not is_active_window(c, now):
+        if not c.alerts_enabled or u.monitoring_paused or away_today(u, now) or not is_active_window(c, now):
             return None
         if in_window(minutes_of_day(now), parse_hhmm(u.quiet_start), parse_hhmm(u.quiet_end)):
             return None

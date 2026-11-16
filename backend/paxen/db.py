@@ -42,6 +42,8 @@ class User(Base):
     # Automatic trips (paxen/autotrips.py): the phone reports leaving/reaching Home and Work; times only, no positions
     auto_trips: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_trip_stats: Mapped[dict | None] = mapped_column(JSON)  # {"recorded": n, "skipped": {reason: n}, "last": ...}
+    # "Not commuting today": the London date (YYYY-MM-DD) with no alerts or briefings; it lapses by itself tomorrow
+    away_date: Mapped[str | None] = mapped_column(String(10))
     places = relationship("Place", cascade="all, delete-orphan", back_populates="user")
     commutes = relationship("Commute", cascade="all, delete-orphan", back_populates="user")
 
@@ -338,6 +340,7 @@ _ADDED_COLUMNS = [("observed_arrivals", "direction", "VARCHAR(120)"),
                   ("users", "auto_trips", "BOOLEAN DEFAULT FALSE"),
                   ("users", "auto_trip_stats", "JSON"),
                   ("commutes", "briefing_at", "VARCHAR(5)"),
+                  ("users", "away_date", "VARCHAR(10)"),
                   ("day_samples", "arrivals_trimmed", "BOOLEAN DEFAULT FALSE"),
                   ("predictions", "terminates", "BOOLEAN")]
 

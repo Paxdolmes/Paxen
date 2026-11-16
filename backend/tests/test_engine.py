@@ -186,3 +186,43 @@ def test_model_gets_the_same_disruption_definition_it_was_trained_with(session):
     f = forecast_journey(j, ctx, MORNING)
     assert f.legs[1].category == "good"  # the journey itself is unaffected...
     assert seen and all(d is True and c == "severe" for d, c in seen)  # ...but the model sees what it trained on
+
+
+def test_line_statuses_a_minute_old_are_served_while_new_ones_are_fetched(monkeypatch):
+    import threading
+    import time as _time
+    from types import SimpleNamespace
+
+    from paxen import engine
+    from paxen.domain import LineStatus
+
+    gate, calls = threading.Event(), []
+
+    class Slow:
+        name = "tfl"
+
+        def line_statuses(self, now):
+            calls.append(now)
+            if len(calls) > 1:
+                gate.wait(5)
+            cat = "good" if len(calls) == 1 else "severe"
+            return SimpleNamespace(items=[LineStatus("victoria", "Victoria", "tube", cat, cat, None)])
+
+    engine.clear_status_cache()
+    clock = [1000.0]
+    monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
+    p = Slow()
+    assert engine.current_statuses(p, MORNING)["victoria"].category == "good"
+    clock[0] += 90  # over a minute old: served at once, refreshed behind
+    assert engine.current_statuses(p, MORNING)["victoria"].category == "good"
+    assert engine.current_statuses(p, MORNING)["victoria"].category == "good" and len(calls) <= 2
+    gate.set()
+    for _ in range(100):
+        if not engine._status_refreshing:
+            break
+        _time.sleep(0.02)
+    assert engine.current_statuses(p, MORNING)["victoria"].category == "severe" and len(calls) == 2
+    clock[0] += 400  # too old to trust: fetched before answering
+    engine.current_statuses(p, MORNING)
+    assert len(calls) == 3
+    engine.clear_status_cache()

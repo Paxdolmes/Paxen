@@ -54,7 +54,7 @@ def _token() -> str:
     return token
 
 
-def send(push_token: str, title: str, body: str, data: dict | None = None) -> str:
+def send(push_token: str, title: str, body: str, data: dict | None = None, category: str | None = None) -> str:
     """'sent', 'gone' (the app was deleted or the token is no longer valid: forget it) or 'failed'."""
     global _client, last_error
     last_error = None
@@ -64,7 +64,10 @@ def send(push_token: str, title: str, body: str, data: dict | None = None) -> st
         return "failed"
     device = push_token.removeprefix(PREFIX)
     host = os.getenv("APNS_HOST", "api.push.apple.com")
-    payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}, **(data or {})}
+    aps = {"alert": {"title": title, "body": body}, "sound": "default"}
+    if category:  # which buttons the notification gets (the app registers them: mobile/src/lib/push.ts)
+        aps["category"] = category
+    payload = {"aps": aps, **(data or {})}
     try:
         _client = _client or httpx.Client(http2=True, timeout=10)
         r = _client.post(f"https://{host}/3/device/{device}", json=payload, headers={

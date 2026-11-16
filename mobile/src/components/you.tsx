@@ -3,7 +3,7 @@ import { Linking, View } from 'react-native'
 import { router } from 'expo-router'
 import { BellRing, Briefcase, DatabaseZap, History, Home, Pencil, ShieldCheck, Trash2, UserX } from 'lucide-react-native'
 import { mutate } from 'swr'
-import { DAY_LABELS, fmtDays, fmtPct, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
+import { DAY_LABELS, fmtDays, fmtMin, fmtPct, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
 import { radii } from '@/shared/paxen-tokens'
 import type { AutoTripStats, ChosenStop, Commute, Dashboard, Insights, Place, PlaceSearchResult, Preference, User } from '@/shared/types'
 import { api, tokenStore } from '@/lib/api'
@@ -639,8 +639,38 @@ export function InsightsSection() {
     )
   const { personal: pp, model: m } = data
   const ratedUseful = pp.alerts_rated > 0 ? `${pp.alerts_rated_useful} of ${pp.alerts_rated}` : 'Not rated yet'
+  const w = pp.week
+  const vsLast = w?.typical_min != null && w.typical_last_week_min != null ? Math.round(w.typical_min - w.typical_last_week_min) : null
   return (
     <Section title="How Paxen is doing">
+      {w && w.trips > 0 && (
+        <Card style={{ padding: 20, gap: 16 }}>
+          <View style={{ gap: 4 }}>
+            <Text variant="headline">Your week</Text>
+            <Text variant="footnote" tone="secondary">
+              {w.trips} {w.trips === 1 ? 'trip' : 'trips'} in the last 7 days, {fmtMin(w.minutes_travelled)} travelling.
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Stat
+              label="Typical trip"
+              value={fmtMin(w.typical_min)}
+              hint={vsLast == null ? undefined : vsLast === 0 ? 'Same as the week before' : `${Math.abs(vsLast)} min ${vsLast < 0 ? 'quicker' : 'slower'} than the week before`}
+            />
+            <Stat label="Quickest to slowest" value={`${Math.round(w.quickest_min ?? 0)}–${Math.round(w.slowest_min ?? 0)} min`} />
+            <Stat
+              label="Forecast within 2 min"
+              value={w.forecast_within_2_min != null ? fmtPct(w.forecast_within_2_min) : '—'}
+              hint="Of this week's trips"
+            />
+            <Stat
+              label="Saved by switching"
+              value={`${Math.round(w.minutes_saved)} min`}
+              hint={w.routes_switched ? `${w.routes_switched} suggested ${w.routes_switched === 1 ? 'route' : 'routes'} taken` : 'No suggested routes taken'}
+            />
+          </View>
+        </Card>
+      )}
       <Card style={{ padding: 20, gap: 16 }}>
         <Text variant="headline">For you · last {pp.window_days} days</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

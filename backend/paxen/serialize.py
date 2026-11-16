@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import timedelta
 
 from .db import Alert, Commute, Place, Trip, User
-from .engine import CommuteEvaluation, JourneyForecast, is_active_window, route_key
-from .timeutil import aware
+from .engine import CommuteEvaluation, JourneyForecast, away_today, is_active_window, route_key
+from .timeutil import aware, utcnow
 
 
 def iso(dt):
@@ -23,11 +23,12 @@ def commute(c: Commute) -> dict:
             "usual_signature": c.usual_signature}
 
 
-def user(u: User) -> dict:
+def user(u: User, now=None) -> dict:
     return {"id": u.id, "name": u.name, "quiet_start": u.quiet_start, "quiet_end": u.quiet_end,
             "monitoring_paused": u.monitoring_paused, "alert_threshold_min": u.alert_threshold_min,
             "min_gain_min": u.min_gain_min, "push_enabled": bool(u.push_token or u.web_push),
-            "auto_trips": bool(u.auto_trips), "auto_trip_stats": u.auto_trip_stats or {}}
+            "auto_trips": bool(u.auto_trips), "auto_trip_stats": u.auto_trip_stats or {},
+            "away_today": away_today(u, now or utcnow())}
 
 
 LEAVE_BUFFER_MIN = 2.0  # reach the platform this long before the train

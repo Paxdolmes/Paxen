@@ -4,7 +4,7 @@ import { fmtTime, greeting } from '@/shared/format'
 import { useDashboard, useNow } from '@/lib/hooks'
 import { Screen } from '@/components/screen'
 import { Text } from '@/components/text'
-import { AutoTripsNudge, CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
+import { AutoTripsNudge, AwayToday, CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
 import { Button, Card, ErrorState, Section, Skeleton } from '@/components/ui'
 
 export default function TodayScreen() {
@@ -14,7 +14,7 @@ export default function TodayScreen() {
 
   if (!dashboard)
     return (
-      <Screen onRefresh={() => mutate()}>
+      <Screen tripBar={false} onRefresh={() => mutate()}>
         {error ? <ErrorState error={error} onRetry={() => mutate()} /> : <TodaySkeleton />}
       </Screen>
     )
@@ -26,7 +26,7 @@ export default function TodayScreen() {
   const old = now - new Date(dashboard.generated_at).getTime() > 150_000
 
   return (
-    <Screen onRefresh={() => mutate()}>
+    <Screen tripBar={false} onRefresh={() => mutate()}>
       <View style={{ gap: 4, paddingHorizontal: 4 }}>
         <Text variant="title1" accessibilityRole="header">
           {greeting(dashboard.user.name)}
@@ -44,6 +44,7 @@ export default function TodayScreen() {
       </View>
 
       {active && <CommuteHero evaluation={active} onCompare={() => openRoutes(active.commute.id)} />}
+      {active && <AwayToday away={!!dashboard.user.away_today} active={active.active} />}
       {active && <ConditionsStrip conditions={active.conditions} />}
 
       <AutoTripsNudge enabled={!!dashboard.user.auto_trips} />

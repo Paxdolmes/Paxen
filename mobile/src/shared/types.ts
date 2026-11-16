@@ -218,6 +218,21 @@ export interface User {
   /** Automatic trips: the iPhone reports leaving/reaching Home and Work (times only), the server times the commute. */
   auto_trips?: boolean
   auto_trip_stats?: AutoTripStats
+  /** "Not commuting today": no alerts or briefings until tomorrow. */
+  away_today?: boolean
+}
+
+/** The last 7 days in a few numbers. */
+export interface WeekSummary {
+  trips: number
+  minutes_travelled: number
+  typical_min: number | null
+  typical_last_week_min: number | null
+  quickest_min: number | null
+  slowest_min: number | null
+  forecast_within_2_min: number | null // share of trips that took within 2 minutes of the forecast
+  routes_switched: number
+  minutes_saved: number
 }
 
 export interface AutoTripStats {
@@ -344,6 +359,7 @@ export interface ErrorMetrics { n: number; mae_s?: number; bias_s?: number; with
 
 export interface Insights {
   personal: {
+    week?: WeekSummary
     window_days: number
     trips: number
     commute_days: number

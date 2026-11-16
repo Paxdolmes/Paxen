@@ -6,7 +6,9 @@ import { fareLabel, fmtMin, fmtTime } from '@/shared/format'
 import { radii } from '@/shared/paxen-tokens'
 import { crowdingWords, usuallyRange } from '@/shared/plain'
 import type { CommuteEvaluation, Conditions, LineStatus, UpcomingDisruption } from '@/shared/types'
+import { api } from '@/lib/api'
 import { enableAutoTrips } from '@/lib/autotrips'
+import { tap } from '@/lib/haptics'
 import { type ActiveTrip, revalidateAll, useActiveTrip, useLiveTrip, useNow } from '@/lib/hooks'
 import { leaveAdvice } from '@/lib/leave'
 import { persisted } from '@/lib/storage'
@@ -124,13 +126,21 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
 
             {rec.fullness && <FullnessCard fullness={rec.fullness} />}
 
-            {switched && (
-              <View style={{ flexDirection: 'row', gap: 8, borderRadius: radii.md, backgroundColor: p.brandSoft, padding: 16 }}>
-                <Sparkles size={16} color={p.onBrandSoft} style={{ marginTop: 3 }} />
-                <Text variant="callout" color={p.onBrandSoft} style={{ fontWeight: '600', flex: 1 }}>
-                  Better today: take {rec.summary}
-                  {gain != null && Math.round(gain) > 0 ? ` — ${Math.round(gain)} min sooner` : ''}
-                </Text>
+            {switched && usual && (
+              <View style={{ borderRadius: radii.md, backgroundColor: p.brandSoft, padding: 16, gap: 10 }} accessibilityLabel="Suggested route compared with your usual">
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Sparkles size={16} color={p.onBrandSoft} style={{ marginTop: 3 }} />
+                  <Text variant="callout" color={p.onBrandSoft} style={{ fontWeight: '700', flex: 1 }}>
+                    A quicker way today{gain != null && Math.round(gain) > 0 ? `: ${Math.round(gain)} min sooner` : ''}
+                  </Text>
+                </View>
+                <RouteRow label="Suggested" summary={rec.summary} value={`${fmtMin(rec.duration.p50)} · arrive ${fmtTime(rec.arrive_at)}`} color={p.onBrandSoft} strong />
+                <RouteRow
+                  label="Your usual"
+                  summary={usual.summary}
+                  value={usual.feasible ? `${fmtMin(usual.duration.p50)} · arrive ${fmtTime(usual.arrive_at)}` : 'Not running'}
+                  color={p.onBrandSoft}
+                />
               </View>
             )}
 
@@ -144,9 +154,21 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
                 disabled={!rec.feasible}
                 icon={(c) => <Play size={16} color={c} fill={c} />}
               >
-                I&apos;m leaving now
+                {switched ? `Go with ${rec.summary}` : 'I\u2019m leaving now'}
               </Button>
-              <Button variant="secondary" block onPress={onCompare} icon={(c) => <ArrowRight size={16} color={c} />}>
+              {switched && usual?.feasible && (
+                <Button
+                  variant="secondary"
+                  block
+                  onPress={async () => {
+                    if (await start(commute.id, usual)) openLive()
+                  }}
+                  loading={pending === usual.id}
+                >
+                  Stick with {usual.summary}
+                </Button>
+              )}
+              <Button variant={switched ? 'ghost' : 'secondary'} block onPress={onCompare} icon={(c) => <ArrowRight size={16} color={c} />}>
                 See other routes
               </Button>
               <ErrorText>{error}</ErrorText>
@@ -226,6 +248,102 @@ export function CommuteHero({ evaluation, onCompare }: { evaluation: CommuteEval
         )}
       </View>
     </Card>
+  )
+}
+
+function RouteRow({ label, summary, value, color, strong }: { label: string; summary: string; value: string; color: string; strong?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, opacity: strong ? 1 : 0.8 }}>
+      <View style={{ flex: 1 }}>
+        <Text variant="caption" color={color} style={{ fontWeight: '600' }}>
+          {label}
+        </Text>
+        <Text variant="callout" color={color} style={{ fontWeight: strong ? '700' : '500' }} numberOfLines={2}>
+          {summary}
+        </Text>
+      </View>
+      <Text variant="footnote" color={color} tabular style={{ fontWeight: strong ? '700' : '500' }}>
+        {value}
+      </Text>
+    </View>
+  )
+}
+
+/** "Not commuting today": one tap silences today's alerts and briefing; it lapses by itself tomorrow. */
+export function AwayToday({ away, active }: { away: boolean; active: boolean }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const set = async (value: boolean) => {
+    setBusy(true)
+    setFailed(false)
+    try {
+      await api.patchMe({ away_today: value })
+      tap()
+      await revalidateAll()
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!away && !active) return null
+  return (
+    <View style={{ paddingHorizontal: 4, gap: 4 }}>
+      {away ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <Text variant="footnote" tone="secondary" style={{ flex: 1 }}>
+            Not commuting today: alerts and your briefing are off until tomorrow.
+          </Text>
+          <Button variant="ghost" size="sm" onPress={() => set(false)} loading={busy}>
+            Undo
+          </Button>
+        </View>
+      ) : (
+        <View style={{ alignItems: 'flex-start' }}>
+          <Button variant="ghost" size="sm" onPress={() => set(true)} loading={busy}>
+            Not commuting today
+          </Button>
+        </View>
+      )}
+      {failed && <ErrorText>Couldn&apos;t save that. Try again.</ErrorText>}
+    </View>
+  )
+}
+
+/** A trip is under way: a bar on every tab that opens the live view. */
+export function TripBar() {
+  const p = usePalette()
+  const trip = useActiveTrip()
+  const { data: live } = useLiveTrip(trip?.id ?? null, null)
+  if (!trip || (live && live.status !== 'active')) return null
+  const eta = live?.eta ?? new Date(new Date(trip.started_at).getTime() + trip.forecast_p50 * 60_000).toISOString()
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Trip in progress, arriving about ${fmtTime(eta)}. Open live trip`}
+      onPress={openLive}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginHorizontal: 16,
+        marginBottom: 8,
+        paddingHorizontal: 16,
+        height: 44,
+        borderRadius: radii.pill,
+        backgroundColor: p.brand,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <Navigation size={16} color={p.onBrand} />
+      <Text variant="footnote" color={p.onBrand} style={{ fontWeight: '700', flex: 1 }} numberOfLines={1}>
+        On your way · {trip.summary}
+      </Text>
+      <Text variant="footnote" color={p.onBrand} tabular style={{ fontWeight: '700' }}>
+        ~{fmtTime(eta)}
+      </Text>
+      <ChevronRight size={16} color={p.onBrand} />
+    </Pressable>
   )
 }
 

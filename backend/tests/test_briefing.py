@@ -140,3 +140,45 @@ def test_the_worker_reports_whether_it_can_send_iphone_pushes(client, monkeypatc
     recorder._DATA_STATS.clear()
     worker = c.get("/v1/health").json()["data"]["push"]["worker"]
     assert worker == {"apns_configured": False, "seen_at": MORNING.isoformat(), "prediction_retention_days": 60}
+
+
+def test_not_commuting_today_silences_today_only(client):
+    c, to_work = client
+    c.patch(f"/v1/commutes/{to_work}", json={"briefing_at": "08:15"})
+    assert c.get("/v1/me").json()["away_today"] is False
+    assert c.patch("/v1/me", json={"away_today": True}).json()["away_today"] is True
+    run(MORNING)
+    assert briefings(c, to_work) == []
+    get_provider().scenario = "victoria-suspended"  # the usual route is down: normally an alert
+    clear_status_cache()
+    with SessionLocal() as s:
+        ev = evaluate_commute(s, get_provider(), s.get(Commute, to_work), MORNING)
+        assert maybe_alert(s, ev, MORNING) is None
+        tomorrow = MORNING + timedelta(days=1)  # it lapses by itself
+        ev = evaluate_commute(s, get_provider(), s.get(Commute, to_work), tomorrow)
+        assert maybe_alert(s, ev, tomorrow) is not None
+    assert c.patch("/v1/me", json={"away_today": False}).json()["away_today"] is False
+    get_provider().scenario = "normal"
+    assert run(MORNING) == 1 and len(briefings(c, to_work)) == 1
+
+
+def test_this_week_in_numbers(client):
+    c, to_work = client
+    from paxen.db import Trip
+    from paxen.insights import week_summary
+    from paxen.timeutil import naive_utc
+
+    def trip(days_ago, minutes, forecast, alert=None):
+        t0 = naive_utc(MORNING - timedelta(days=days_ago))
+        return Trip(user_id="u", started_at=t0, arrived_at=t0 + timedelta(minutes=minutes), duration_min=minutes,
+                    forecast_p50=forecast, followed_alert_id=alert)
+
+    saved = Alert(id="a1", user_id="u", kind="better_route", title="t", body="b", confidence="high", gain_min=8.0)
+    trips = [trip(1, 30, 31), trip(2, 34, 30), trip(3, 26, 27, "a1"), trip(9, 40, 35), trip(10, 36, 35)]
+    w = week_summary(trips, [saved], MORNING)
+    assert w["trips"] == 3 and w["minutes_travelled"] == 90 and w["typical_min"] == 30
+    assert w["typical_last_week_min"] == 38 and w["quickest_min"] == 26 and w["slowest_min"] == 34
+    assert w["forecast_within_2_min"] == 0.67 and w["routes_switched"] == 1 and w["minutes_saved"] == 9.0
+    empty = week_summary([], [], MORNING)
+    assert empty["trips"] == 0 and empty["typical_min"] is None and empty["forecast_within_2_min"] is None
+    assert c.get("/v1/insights").json()["personal"]["week"]["trips"] == 0
