@@ -193,6 +193,7 @@ class MePatch(BaseModel):
     alert_threshold_min: int | None = Field(default=None, ge=2, le=60)
     min_gain_min: int | None = Field(default=None, ge=1, le=60)
     auto_trips: bool | None = None
+    away_today: bool | None = None  # "not commuting today": no alerts or briefings until tomorrow
 
 
 class TripEventIn(BaseModel):
@@ -289,7 +290,7 @@ def create_user(s: Session = Depends(db)):
 
 @app.get("/v1/me")
 def me(u: User = Depends(current_user)):
-    return ser.user(u)
+    return ser.user(u, now())
 
 
 # ---- web push (paxen/webpush.py) ----
@@ -314,14 +315,14 @@ def push_subscribe(body: PushSubscriptionIn, u: User = Depends(current_user), s:
     sub = body.subscription
     u.web_push = {"endpoint": sub["endpoint"], "keys": {k: sub["keys"][k] for k in ("p256dh", "auth")}}
     s.commit()
-    return ser.user(u)
+    return ser.user(u, now())
 
 
 @app.delete("/v1/push/subscribe")
 def push_unsubscribe(u: User = Depends(current_user), s: Session = Depends(db)):
     u.web_push = None
     s.commit()
-    return ser.user(u)
+    return ser.user(u, now())
 
 
 @app.post("/v1/push/test")
@@ -349,7 +350,10 @@ def push_test(u: User = Depends(current_user), s: Session = Depends(db)):
 
 @app.patch("/v1/me")
 def patch_me(body: MePatch, u: User = Depends(current_user), s: Session = Depends(db)):
-    for k, v in body.model_dump(exclude_unset=True).items():
+    patch = body.model_dump(exclude_unset=True)
+    if "away_today" in patch:
+        u.away_date = local(now()).date().isoformat() if patch.pop("away_today") else None
+    for k, v in patch.items():
         setattr(u, k, v)
     if body.auto_trips is False:
         from .autotrips import forget
@@ -357,7 +361,7 @@ def patch_me(body: MePatch, u: User = Depends(current_user), s: Session = Depend
         forget(s, u)
     s.add(u)
     s.commit()
-    return ser.user(u)
+    return ser.user(u, now())
 
 
 @app.delete("/v1/me", status_code=204)
@@ -630,7 +634,7 @@ def dashboard(response: Response, u: User = Depends(current_user), s: Session = 
     p = get_provider()
     with timing.phase("rest"):
         out = {
-            "generated_at": t.isoformat(), "user": ser.user(u), "provider": p.name,
+            "generated_at": t.isoformat(), "user": ser.user(u, now()), "provider": p.name,
             "simulated": isinstance(p, SimProvider), "feed": feed_health(s, t, p.name),
             "active_commute_id": active["commute"]["id"] if active else None,
             "commutes": evals, "network": _network(t, evals), "unread_alerts": unread,

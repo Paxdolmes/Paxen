@@ -49,6 +49,22 @@ def test_signed_request_to_apple(key, monkeypatch):
     key.public_key().verify(der, f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))  # raises if wrong
 
 
+def test_commute_alerts_carry_buttons(key, monkeypatch, session):
+    seen = fake_client(monkeypatch, 200)
+    u = User(token_hash="b" * 64, push_token="apns:abcd")
+    session.add(u)
+    session.flush()
+    alert = Alert(user_id=u.id, commute_id="c1", kind="better_route", title="t", body="b", confidence="high",
+                  recommended_signature="tube:victoria", data={})
+    session.add(alert)
+    session.flush()
+    assert deliver(u, alert) == "push"
+    assert seen["json"]["aps"]["category"] == "commute"
+    assert seen["json"]["commute_id"] == "c1" and seen["json"]["signature"] == "tube:victoria"
+    apns.send("apns:abcd", "t", "b")
+    assert "category" not in seen["json"]["aps"]  # a test push has no commute: no buttons
+
+
 def test_uninstalled_app_is_forgotten(key, monkeypatch, session):
     fake_client(monkeypatch, 410, b'{"reason":"Unregistered"}')
     u = User(token_hash="a" * 64, push_token="apns:dead")

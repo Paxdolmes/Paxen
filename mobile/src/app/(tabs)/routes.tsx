@@ -5,6 +5,7 @@ import { mutate } from 'swr'
 import { fmtMin, PREFERENCE_LABELS, PREFERENCES } from '@/shared/format'
 import type { Preference } from '@/shared/types'
 import { api } from '@/lib/api'
+import { tap } from '@/lib/haptics'
 import { useActiveTrip, useCompare, useDashboard } from '@/lib/hooks'
 import { useStartTrip } from '@/lib/trip-actions'
 import { OptionCard } from '@/components/option-card'
@@ -37,6 +38,7 @@ export default function RoutesScreen() {
     setUsualError(null)
     try {
       await api.setUsual(commuteId, sig)
+      tap()
       await Promise.all([refetch(), mutate(['dashboard'])])
     } catch (e) {
       setUsualError(e instanceof Error ? e.message : 'Could not save your usual route.')

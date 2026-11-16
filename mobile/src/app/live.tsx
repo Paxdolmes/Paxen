@@ -9,6 +9,7 @@ import { layout, radii } from '@/shared/paxen-tokens'
 import type { LiveTrip } from '@/shared/types'
 import { api } from '@/lib/api'
 import { activeTripStore, useActiveTrip, useLiveTrip } from '@/lib/hooks'
+import { success } from '@/lib/haptics'
 import { useGeolocation } from '@/lib/location'
 import { usePalette, useShadow } from '@/lib/theme'
 import { refreshAfterTrip } from '@/lib/trip-actions'
@@ -169,6 +170,7 @@ export default function LiveTripScreen() {
     setActionError(null)
     try {
       await api.arrive(active.id)
+      success()
       await mutate((key) => Array.isArray(key) && key[0] === 'live')
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Could not save your arrival. Try again.')

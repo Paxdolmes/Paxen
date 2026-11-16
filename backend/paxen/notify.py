@@ -42,8 +42,11 @@ def deliver(user: User, alert: Alert) -> str:
     if token.startswith("apns:"):  # the iPhone app
         from . import apns
 
+        # With a commute, the notification gets buttons: start the trip, see the routes, or "not commuting today".
         res = apns.send(token, alert.data.get("push_title") or alert.title, push_body(alert, conf),
-                        {"alert_id": alert.id, "url": open_url(alert)})
+                        {"alert_id": alert.id, "url": open_url(alert), "kind": alert.kind,
+                         "commute_id": alert.commute_id, "signature": alert.recommended_signature},
+                        category="commute" if alert.commute_id else None)
         if res == "gone":
             user.push_token = None
         alert.delivered = {"sent": "push", "gone": "push_gone"}.get(res, "push_failed")

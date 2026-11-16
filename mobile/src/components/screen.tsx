@@ -6,11 +6,25 @@ import { layout } from '@/shared/paxen-tokens'
 import { useDashboard } from '@/lib/hooks'
 import { usePalette } from '@/lib/theme'
 import { Text } from './text'
+import { TripBar } from './today'
 import { Wordmark } from './transit'
 import { Chip } from './ui'
 
 /** A tab's page: the Paxen header, then scrolling content with pull-to-refresh. */
-export function Screen({ title, children, onRefresh, gap = 24 }: { title?: string; children: ReactNode; onRefresh?: () => Promise<unknown>; gap?: number }) {
+export function Screen({
+  title,
+  children,
+  onRefresh,
+  gap = 24,
+  tripBar = true,
+}: {
+  title?: string
+  children: ReactNode
+  onRefresh?: () => Promise<unknown>
+  gap?: number
+  /** the trip-in-progress bar; Today shows the trip in its own card instead */
+  tripBar?: boolean
+}) {
   const p = usePalette()
   const insets = useSafeAreaInsets()
   const { data: dashboard } = useDashboard()
@@ -39,6 +53,7 @@ export function Screen({ title, children, onRefresh, gap = 24 }: { title?: strin
           )}
         </View>
       </View>
+      {tripBar && <TripBar />}
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: 8, paddingBottom: 32, gap }}

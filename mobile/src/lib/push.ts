@@ -32,28 +32,67 @@ export async function disablePush() {
   await api.setPushToken(null)
 }
 
-/** Shows alerts while the app is open, opens the right screen when one is tapped, and keeps the token fresh. */
-export function initPush(open: (route: string) => void, signedIn: boolean, onReceive?: () => void) {
+export interface PushHandlers {
+  open: (route: string) => void
+  /** "Start trip" on a commute notification. */
+  startTrip: (commuteId: string) => void
+  /** "Not commuting today". */
+  away: () => void
+  /** A notification arrived while the app is open. */
+  onReceive?: () => void
+}
+
+type PushData = { url?: string; commute_id?: string | null } | undefined
+
+/** The buttons on commute notifications (the server marks those with the "commute" category). */
+function registerButtons() {
+  return Notifications.setNotificationCategoryAsync('commute', [
+    { identifier: 'start', buttonTitle: 'Start trip', options: { opensAppToForeground: true } },
+    { identifier: 'routes', buttonTitle: 'Show routes', options: { opensAppToForeground: true } },
+    { identifier: 'away', buttonTitle: 'Not commuting today', options: { opensAppToForeground: false, isDestructive: true } },
+  ]).catch(() => {})
+}
+
+function respond(r: Notifications.NotificationResponse | null | undefined, h: PushHandlers) {
+  if (!r) return
+  const data = r.notification.request.content.data as PushData
+  const commute = data?.commute_id ?? null
+  if (r.actionIdentifier === 'away') return h.away()
+  if (r.actionIdentifier === 'start' && commute) return h.startTrip(commute)
+  if (r.actionIdentifier === 'routes' && commute) return h.open(`/routes?commute=${commute}`)
+  const route = routeFor(data?.url)
+  if (route) h.open(route)
+}
+
+/** Shows alerts while the app is open, acts on taps and buttons, and keeps the token fresh. */
+export function initPush(h: PushHandlers, signedIn: boolean) {
   if (Platform.OS === 'web') return () => {}
   Notifications.setNotificationHandler({
     handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
   })
-  const sub = Notifications.addNotificationResponseReceivedListener((r) => {
-    const route = routeFor((r.notification.request.content.data as { url?: string } | undefined)?.url)
-    if (route) open(route)
-  })
+  void registerButtons()
+  let handled: string | null = null // the response that launched the app also reaches the listener: act once
+  const once = (r: Notifications.NotificationResponse | null | undefined) => {
+    const id = r ? `${r.notification.request.identifier}:${r.actionIdentifier}` : null
+    if (!id || id === handled) return
+    handled = id
+    respond(r, h)
+  }
+  const sub = Notifications.addNotificationResponseReceivedListener(once)
   // An alert that arrives while the app is open: bring the screens up to date with it.
-  const got = Notifications.addNotificationReceivedListener(() => onReceive?.())
-  Notifications.getLastNotificationResponseAsync()
-    .then((r) => {
-      const route = routeFor((r?.notification.request.content.data as { url?: string } | undefined)?.url)
-      if (route) open(route)
-    })
-    .catch(() => {})
-  // Apple can change a device's token; re-send it whenever the app starts with notifications allowed.
-  if (signedIn) pushPermission()
+  const got = Notifications.addNotificationReceivedListener(() => h.onReceive?.())
+  if (signedIn) {
+    Notifications.getLastNotificationResponseAsync()
+      .then((r) => {
+        once(r)
+        if (r) return Notifications.clearLastNotificationResponseAsync()
+      })
+      .catch(() => {})
+    // Apple can change a device's token; re-send it whenever the app starts with notifications allowed.
+    pushPermission()
       .then((s) => (s === 'granted' ? register() : undefined))
       .catch(() => {})
+  }
   return () => {
     sub.remove()
     got.remove()

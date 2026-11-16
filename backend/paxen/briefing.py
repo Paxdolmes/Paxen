@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import Alert, Commute
-from .engine import CommuteEvaluation, evaluate_commute
+from .engine import CommuteEvaluation, away_today, evaluate_commute
 from .timeutil import local, minutes_of_day, naive_utc, parse_hhmm
 
 log = logging.getLogger("paxen.briefing")
@@ -34,7 +34,8 @@ def _day_start(now: datetime) -> datetime:
 
 def is_due(s: Session, c: Commute, now: datetime) -> bool:
     """The briefing time has just passed today, it's one of the commute's days, and none was sent yet today."""
-    if not c.briefing_at or c.user.monitoring_paused or local(now).weekday() not in (c.days or []):
+    if (not c.briefing_at or c.user.monitoring_paused or away_today(c.user, now)
+            or local(now).weekday() not in (c.days or [])):
         return False
     late = minutes_of_day(now) - parse_hhmm(c.briefing_at)
     if not 0 <= late < LATE_MIN:

@@ -9,7 +9,9 @@ import { SWRConfig } from 'swr'
 import { palettes } from '@/shared/paxen-tokens'
 import { fonts } from '@/lib/fonts'
 import { revalidateAll, useToken } from '@/lib/hooks'
+import { api } from '@/lib/api'
 import { initPush } from '@/lib/push'
+import { startRecommended } from '@/lib/trip-actions'
 
 void SplashScreen.preventAutoHideAsync().catch(() => {})
 
@@ -27,7 +29,26 @@ export default function RootLayout() {
     if (token !== undefined && fontsReady) void SplashScreen.hideAsync().catch(() => {})
   }, [token, fontsReady])
 
-  useEffect(() => initPush((route) => router.push(route as never), !!token, () => void revalidateAll()), [token])
+  useEffect(
+    () =>
+      initPush(
+        {
+          open: (route) => router.push(route as never),
+          startTrip: (commuteId) =>
+            void startRecommended(commuteId)
+              .then((ok) => router.push((ok ? '/live' : `/routes?commute=${commuteId}`) as never))
+              .catch(() => router.push('/' as never)),
+          away: () =>
+            void api
+              .patchMe({ away_today: true })
+              .then(() => revalidateAll())
+              .catch(() => {}),
+          onReceive: () => void revalidateAll(),
+        },
+        !!token,
+      ),
+    [token],
+  )
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => next === 'active' && revalidateAll())

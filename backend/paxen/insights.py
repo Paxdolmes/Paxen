@@ -51,6 +51,34 @@ def model_summary(s: Session, source: str = "sim") -> dict:
             "by_line": m.get("by_line")}
 
 
+def week_summary(trips: list, alerts: list, now: datetime) -> dict:
+    """The last 7 days in a few numbers, with the 7 days before for comparison."""
+    def span(a: int, b: int) -> list:
+        lo, hi = naive_utc(now - timedelta(days=a)), naive_utc(now - timedelta(days=b))
+        return [t for t in trips if lo <= t.started_at < hi]
+
+    this, last = span(7, 0), span(14, 7)
+    typical = statistics.median(t.duration_min for t in this) if this else None
+    close = [t for t in this if t.forecast_p50 is not None]
+    week_ids = {t.followed_alert_id for t in this if t.followed_alert_id}
+    saved = sum(max(0.0, a.gain_min - (t.duration_min - t.forecast_p50)) for t in this for a in alerts
+                if a.id == t.followed_alert_id and a.gain_min and t.forecast_p50)
+    quickest = min(this, key=lambda t: t.duration_min, default=None)
+    slowest = max(this, key=lambda t: t.duration_min, default=None)
+    return {
+        "trips": len(this),
+        "minutes_travelled": round(sum(t.duration_min for t in this)),
+        "typical_min": round(typical, 1) if typical is not None else None,
+        "typical_last_week_min": round(statistics.median(t.duration_min for t in last), 1) if last else None,
+        "quickest_min": round(quickest.duration_min, 1) if quickest else None,
+        "slowest_min": round(slowest.duration_min, 1) if slowest else None,
+        "forecast_within_2_min": (round(sum(abs(t.duration_min - t.forecast_p50) <= 2 for t in close) / len(close), 2)
+                                  if close else None),
+        "routes_switched": len(week_ids),
+        "minutes_saved": round(saved, 1),
+    }
+
+
 def personal_summary(s: Session, user_id: str, now: datetime) -> dict:
     since = naive_utc(now - timedelta(days=30))
     trips = s.scalars(select(Trip).where(Trip.user_id == user_id, Trip.duration_min.is_not(None),
@@ -69,6 +97,7 @@ def personal_summary(s: Session, user_id: str, now: datetime) -> dict:
     errs = [abs(t.duration_min - t.forecast_p50) for t in trips if t.forecast_p50 is not None]
     commute_days = len({t.started_at.date() for t in trips})
     return {
+        "week": week_summary(trips, alerts, now),
         "window_days": 30,
         "trips": len(trips),
         "commute_days": commute_days,
