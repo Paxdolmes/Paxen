@@ -9,6 +9,7 @@ before production use — see docs/data-sources.md.
 """
 from __future__ import annotations
 
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -35,6 +36,9 @@ DEFAULT_MODES = "tube,overground,elizabeth-line,dlr,bus,national-rail,walking"
 # bus-only, surfaces the genuinely different alternatives a commuter would consider during disruption.
 ALT_MODE_SETS = [DEFAULT_MODES, "overground,elizabeth-line,dlr,bus,national-rail,tram,walking", "bus,walking"]
 JOURNEY_CACHE_S = 120
+# A plan this recent, for a departure this little earlier, is served at once while a new one is fetched in the
+# background: TfL's planner takes 2-10 s, and the app re-asks every minute.
+STALE_PLAN_S = 360
 ARRIVALS_CACHE_S = 20
 STATUS_MODES = "tube,overground,elizabeth-line,dlr,national-rail"
 
@@ -349,6 +353,9 @@ class TflProvider:
         self.app_key = app_key
         self.client = httpx.Client(timeout=timeout, headers={"User-Agent": "paxen-commute/0.1"})
         self._journey_cache: dict[tuple, tuple[float, list[Journey]]] = {}
+        self._journey_last: dict[tuple, tuple[float, tuple[datetime, list[Journey]]]] = {}  # newest plan per trip
+        self._planning: set[tuple] = set()
+        self._planning_lock = threading.Lock()
         self._crowd_cache: dict[tuple, tuple[float, object]] = {}
         self._arrivals_cache: dict[str, tuple[float, FetchResult]] = {}
         self.last_response_meta: dict = {}
@@ -406,11 +413,37 @@ class TflProvider:
 
     def journeys(self, origin, dest, depart_at):
         loc = depart_at.astimezone(LONDON)
-        key = (round(origin[0], 4), round(origin[1], 4), round(dest[0], 4), round(dest[1], 4),
-               loc.strftime("%Y%m%d%H") + str(loc.minute // 5))
+        od = (round(origin[0], 4), round(origin[1], 4), round(dest[0], 4), round(dest[1], 4))
+        key = od + (loc.strftime("%Y%m%d%H") + str(loc.minute // 5),)
         hit = self._journey_cache.get(key)
         if hit and time.monotonic() - hit[0] < JOURNEY_CACHE_S:
             return list(hit[1])
+        last = self._journey_last.get(od)
+        if (last and time.monotonic() - last[0] < STALE_PLAN_S
+                and 0 <= (depart_at - last[1][0]).total_seconds() < STALE_PLAN_S):
+            self._plan_in_background(key, od, origin, dest, depart_at)
+            return list(last[1][1])
+        return list(self._plan(key, od, origin, dest, depart_at))
+
+    def _plan_in_background(self, key, od, origin, dest, depart_at) -> None:
+        with self._planning_lock:
+            if key in self._planning:
+                return
+            self._planning.add(key)
+
+        def run():
+            try:
+                self._plan(key, od, origin, dest, depart_at)
+            except Exception:  # the plan being served stays until it is too old; the next request then reports it
+                log.info("background journey plan failed", exc_info=True)
+            finally:
+                with self._planning_lock:
+                    self._planning.discard(key)
+
+        threading.Thread(target=run, name="journey-plan", daemon=True).start()
+
+    def _plan(self, key, od, origin, dest, depart_at) -> list[Journey]:
+        loc = depart_at.astimezone(LONDON)
         path = f"/Journey/JourneyResults/{origin[0]:.5f},{origin[1]:.5f}/to/{dest[0]:.5f},{dest[1]:.5f}"
         params = {"date": loc.strftime("%Y%m%d"), "time": loc.strftime("%H%M"), "timeIs": "Departing",
                   "journeyPreference": "LeastTime", "alternativeRoute": "true"}
@@ -427,8 +460,10 @@ class TflProvider:
             found += parse_journeys(data)
         out = dedupe_journeys(found)
         self._journey_cache[key] = (time.monotonic(), out)
+        self._journey_last[od] = (time.monotonic(), (depart_at, out))
         prune(self._journey_cache, JOURNEY_CACHE_S, 500)
-        return list(out)
+        prune(self._journey_last, STALE_PLAN_S, 500)
+        return out
 
     def search_places(self, query: str) -> list[PlaceResult]:
         data, *_ = self._get(f"/StopPoint/Search/{query}", {"maxResults": 15})

@@ -30,6 +30,29 @@ def user(u: User) -> dict:
             "auto_trips": bool(u.auto_trips), "auto_trip_stats": u.auto_trip_stats or {}}
 
 
+LEAVE_BUFFER_MIN = 2.0  # reach the platform this long before the train
+
+
+def leave_by(f: JourneyForecast) -> dict | None:
+    """The latest you can set off and still catch the train this forecast has you on: the wait at the first stop,
+    less a buffer, is time you could spend at home instead. Only when that train is a real one (live countdown or a
+    timetabled departure), and only when it buys at least a minute."""
+    if not f.feasible:
+        return None
+    before = 0.0
+    for l in f.legs:
+        if l.mode == "walking":
+            before += l.ride_min
+            continue
+        spare = int(l.wait_min - LEAVE_BUFFER_MIN)
+        if l.wait_basis not in ("live", "timetable") or spare < 1:
+            return None
+        train = f.depart_at + timedelta(minutes=before + l.transfer_min + l.wait_min)
+        return {"at": iso(f.depart_at + timedelta(minutes=spare)), "spare_min": spare, "train_at": iso(train),
+                "line_name": l.line_name, "mode": l.mode, "stop": l.from_name, "live": l.wait_basis == "live"}
+    return None
+
+
 def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) -> dict:
     j = f.journey
     leg_paths = [l.path for l in j.legs]
@@ -42,6 +65,7 @@ def option(f: JourneyForecast, ev: CommuteEvaluation, with_paths: bool = False) 
         "is_recommended": ev.recommended is f,
         "feasible": f.feasible,
         "depart_at": iso(f.depart_at),
+        "leave_by": leave_by(f),
         "arrive_at": at(f.p50),
         "arrive_range": [at(f.p10), at(f.p90)],
         "duration": {"p10": f.p10, "p50": f.p50, "p90": f.p90},

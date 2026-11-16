@@ -123,6 +123,16 @@ export interface BoardingFullness {
   basis: string
 }
 
+export interface LeaveBy {
+  at: string
+  spare_min: number // whole minutes you can wait before setting off
+  train_at: string // when that train leaves the stop
+  line_name: string | null
+  mode: Mode
+  stop: string
+  live: boolean // from the live countdown (false: a timetabled departure)
+}
+
 export interface RouteOption {
   id: string // route signature; pass back to set usual route / log a trip
   summary: string // "Weaver line → Central"
@@ -130,6 +140,8 @@ export interface RouteOption {
   is_recommended: boolean
   feasible: boolean // false = a line on this route is suspended
   depart_at: string
+  // the latest you can set off and still catch the same first train; null when there's nothing to gain (go now)
+  leave_by?: LeaveBy | null
   arrive_at: string // median forecast
   arrive_range: [string, string] // 10th–90th percentile arrival
   duration: { p10: number; p50: number; p90: number } // door-to-door minutes

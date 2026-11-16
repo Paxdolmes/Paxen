@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { Alert, Platform, Pressable, ScrollView, View } from 'react-native'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CircleCheck, Crosshair, Footprints, LocateFixed, MapPin, X } from 'lucide-react-native'
@@ -16,7 +16,7 @@ import { type BoardingSnapshot, BoardingQuestion, FullnessCard } from '@/compone
 import { Text } from '@/components/text'
 import TripMap from '@/components/trip-map'
 import { ConfidenceBadge, LineChip } from '@/components/transit'
-import { Button, Card, Skeleton } from '@/components/ui'
+import { Button, Card, ErrorText, Skeleton } from '@/components/ui'
 
 function phaseText(t: LiveTrip): string {
   const leg = t.legs[t.current_leg ?? 0]
@@ -153,6 +153,7 @@ export default function LiveTripScreen() {
   const { data: trip, error } = useLiveTrip(active?.id ?? null, geo.pos)
   const [follow, setFollow] = useState(true)
   const [busy, setBusy] = useState<'arrive' | 'cancel' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const position: [number, number] | null = geo.pos ? [geo.pos.lat, geo.pos.lon] : null
   const ask = useBoardingQuestion(trip)
 
@@ -165,14 +166,25 @@ export default function LiveTripScreen() {
   const arriveNow = async () => {
     if (!active) return
     setBusy('arrive')
+    setActionError(null)
     try {
       await api.arrive(active.id)
       await mutate((key) => Array.isArray(key) && key[0] === 'live')
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not save your arrival. Try again.')
     } finally {
       setBusy(null)
     }
   }
-  const cancel = async () => {
+  const cancel = () => {
+    // One slip of the thumb shouldn't throw a trip away.
+    if (Platform.OS === 'web') return void cancelNow()
+    Alert.alert('Cancel this trip?', "It won't be saved or used to learn your normal.", [
+      { text: 'Keep trip', style: 'cancel' },
+      { text: 'Cancel trip', style: 'destructive', onPress: () => void cancelNow() },
+    ])
+  }
+  const cancelNow = async () => {
     if (!active) return
     setBusy('cancel')
     try {
@@ -334,6 +346,7 @@ export default function LiveTripScreen() {
                 <Steps trip={trip} />
 
                 <View style={{ marginTop: 'auto', gap: 8 }}>
+                  <ErrorText>{actionError}</ErrorText>
                   <Button variant="secondary" block onPress={arriveNow} loading={busy === 'arrive'}>
                     I&apos;ve arrived
                   </Button>

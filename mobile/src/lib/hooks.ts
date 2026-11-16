@@ -1,6 +1,6 @@
-import { useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import useSWR, { mutate as globalMutate } from 'swr'
-import type { Preference } from '@/shared/types'
+import type { Dashboard, Preference } from '@/shared/types'
 import { api, tokenStore } from './api'
 import { persisted } from './storage'
 
@@ -10,12 +10,49 @@ export function useToken() {
 
 const swrOpts = { revalidateOnFocus: true, shouldRetryOnError: false } as const
 
+/* The last Today data is kept on the phone, so opening the app shows it at once while fresh data loads. */
+const dashStore = persisted('paxen.dashboard')
+const DASH_KEEP_MS = 30 * 60_000 // older than this is no use for a commute: show the loading state instead
+const who = (token: string | null | undefined) => (token ? token.slice(-12) : '')
+
+async function fetchDashboard() {
+  const data = await api.dashboard()
+  dashStore.set(JSON.stringify({ who: who(tokenStore.get()), at: Date.now(), data }))
+  return data
+}
+
+function savedDashboard(raw: string | null | undefined, token: string | null | undefined): Dashboard | undefined {
+  if (!raw || !token) return undefined
+  try {
+    const saved = JSON.parse(raw) as { who: string; at: number; data: Dashboard }
+    return saved.who === who(token) && Date.now() - saved.at < DASH_KEEP_MS ? saved.data : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function useDashboard(enabled = true) {
-  return useSWR(enabled ? ['dashboard'] : null, () => api.dashboard(), {
+  const token = useToken()
+  const raw = useSyncExternalStore(dashStore.subscribe, dashStore.get, dashStore.get)
+  const saved = useMemo(() => savedDashboard(raw, token), [raw, token])
+  // Wait for the saved copy to be read (a few milliseconds) so the first render can use it.
+  return useSWR(enabled && raw !== undefined ? ['dashboard'] : null, fetchDashboard, {
     ...swrOpts,
     refreshInterval: 60_000,
     keepPreviousData: true,
+    fallbackData: saved,
+    revalidateOnMount: true,
   })
+}
+
+/** The time now, re-read every `everyMs` so countdowns keep moving between refreshes. */
+export function useNow(everyMs = 20_000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), everyMs)
+    return () => clearInterval(id)
+  }, [everyMs])
+  return now
 }
 
 export function useCompare(commuteId: string | null | undefined, preference: Preference | undefined) {

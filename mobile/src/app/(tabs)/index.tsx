@@ -1,7 +1,7 @@
 import { View } from 'react-native'
 import { router } from 'expo-router'
-import { greeting } from '@/shared/format'
-import { useDashboard } from '@/lib/hooks'
+import { fmtTime, greeting } from '@/shared/format'
+import { useDashboard, useNow } from '@/lib/hooks'
 import { Screen } from '@/components/screen'
 import { Text } from '@/components/text'
 import { AutoTripsNudge, CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
@@ -9,6 +9,7 @@ import { Button, Card, ErrorState, Section, Skeleton } from '@/components/ui'
 
 export default function TodayScreen() {
   const { data: dashboard, error, mutate } = useDashboard()
+  const now = useNow()
   const openRoutes = (id: string) => router.navigate({ pathname: '/routes', params: { commute: id } })
 
   if (!dashboard)
@@ -21,6 +22,8 @@ export default function TodayScreen() {
   const active = dashboard.commutes.find((c) => c.commute.id === dashboard.active_commute_id) ?? dashboard.commutes[0]
   const others = dashboard.commutes.filter((c) => c !== active)
   const onRoutes = dashboard.network.filter((l) => l.on_my_routes)
+  // Opened from the copy kept on the phone, or the last refresh failed: say how old the times are.
+  const old = now - new Date(dashboard.generated_at).getTime() > 150_000
 
   return (
     <Screen onRefresh={() => mutate()}>
@@ -28,6 +31,11 @@ export default function TodayScreen() {
         <Text variant="title1" accessibilityRole="header">
           {greeting(dashboard.user.name)}
         </Text>
+        {old && (
+          <Text variant="footnote" tone={error ? 'attention' : 'secondary'} tabular accessibilityLiveRegion="polite">
+            {error ? `Couldn't refresh. Showing times from ${fmtTime(dashboard.generated_at)}.` : `From ${fmtTime(dashboard.generated_at)}. Updating…`}
+          </Text>
+        )}
         {dashboard.user.monitoring_paused && (
           <Text variant="subhead" tone="watch">
             Monitoring is paused. You won&apos;t get alerts until you resume it.
@@ -67,7 +75,7 @@ export default function TodayScreen() {
         </Section>
       )}
 
-      {error ? (
+      {error && !old ? (
         <Text variant="footnote" tone="attention" style={{ paddingHorizontal: 4 }}>
           Couldn&apos;t refresh just now. Showing the last update.
         </Text>
