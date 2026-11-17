@@ -57,9 +57,12 @@ def test_new_days_are_replayed_and_every_step_is_timed(worker_db):
     assert run["finished_at"] and run["step"] is None and run["errors"] == {}
     assert {"export", f"export {day} observed_arrivals", f"replay {day}", "thin", "rebuild"} <= set(run["steps"])
     assert run["result"]["replay"]["days"] == [day]
+    # a day was replayed, so the journey model's evaluation ran straight after (too few days yet to test)
+    assert out["evaluation"] == "collecting" and "evaluate" in run["steps"]
     workers.thin_tick()  # the next run keeps the one before it, so a run that was cut short stays visible
     p = progress(worker_db)
     assert p["previous"]["started_at"] == run["started_at"] and p["run"]["result"]["replay"]["days"] == []
+    assert "evaluation" not in p["run"]["result"]  # nothing new replayed: no evaluation
 
 
 def test_a_failed_export_is_recorded_without_addresses(worker_db, monkeypatch):

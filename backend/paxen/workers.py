@@ -162,6 +162,7 @@ def train_tick() -> dict:
         return res
 
 
+REBUILD_DAYS_PER_RUN = 6  # about 4 minutes each
 THIN_STATUS = "thin_status"  # AppSecret: where the latest storage/history run is (shown on /v1/journeys/report)
 
 
@@ -236,8 +237,10 @@ def thin_tick() -> dict:
       3. thin old days of predictions to the sample the evaluation reads (evaluate.thin_history) and drop arrivals
          no remaining prediction can pair with (evaluate.trim_arrivals); neither changes what training reads;
       4. with PAXEN_DB_KEEP_DAYS set, drop the database copy of old days already safely in the store;
-      5. rebuild days thinned before the store existed from the raw archive (slow: thousands of responses a day),
-         then replay those too."""
+      5. rebuild days thinned before the store existed from the raw archive (about 4 minutes a day), then replay
+         those too;
+      6. if any day was replayed, run the journey model's evaluation on the new days (journey_eval.run), so
+         results don't wait for the daily run."""
     from .evaluate import thin_history, trim_arrivals
 
     prog = Progress()
@@ -291,9 +294,17 @@ def thin_tick() -> dict:
             out["dropped"] = guarded("drop", lambda: drop_exported(s, source, utcnow()))
             # days thinned before the store existed: every measured Tube arrival, rebuilt from the raw archive
             out["rebuilt"] = guarded("rebuild", lambda: rebuild_pending(
-                s, source, archive, from_env(), max_days=2, on_day=lambda day: prog.step(f"rebuild {day}")))
+                s, source, archive, from_env(), max_days=REBUILD_DAYS_PER_RUN,
+                on_day=lambda day: prog.step(f"rebuild {day}")))
             if isinstance(out["rebuilt"], dict) and out["rebuilt"]["days"]:
                 out["replay_rebuilt"] = guarded("replay rebuilt", replay)
+            replayed = [d for k in ("replay", "replay_rebuilt") if isinstance(out.get(k), dict)
+                        for d in out[k]["days"]]
+            if replayed:
+                from .journey_eval import run as evaluate_journeys
+
+                ev = guarded("evaluate", lambda: evaluate_journeys(s, source, archive))
+                out["evaluation"] = ev.get("status") if isinstance(ev, dict) else ev
         prog.finish(out)
         return out
 
