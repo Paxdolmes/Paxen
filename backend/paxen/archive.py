@@ -45,6 +45,12 @@ class LocalArchive:
         path.write_bytes(data)
         return f"file://{path}"
 
+    def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        return self.put(key, data)
+
+    def get_bytes(self, key: str) -> bytes:
+        return (self.root / key).read_bytes()
+
 
 class S3Archive:
     def __init__(self, bucket: str, prefix: str, client=None):
@@ -60,6 +66,16 @@ class S3Archive:
         self.client.put_object(Bucket=self.bucket, Key=full, Body=data, ContentType="application/json",
                                ContentEncoding="gzip")
         return f"s3://{self.bucket}/{full}"
+
+    def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        """A file stored as it is (not a gzip-encoded JSON response like put())."""
+        full = f"{self.prefix}/{key}" if self.prefix else key
+        self.client.put_object(Bucket=self.bucket, Key=full, Body=data, ContentType=content_type)
+        return f"s3://{self.bucket}/{full}"
+
+    def get_bytes(self, key: str) -> bytes:
+        full = f"{self.prefix}/{key}" if self.prefix else key
+        return self.client.get_object(Bucket=self.bucket, Key=full)["Body"].read()
 
 
 @lru_cache(maxsize=1)

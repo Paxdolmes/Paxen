@@ -170,8 +170,25 @@ def thin_tick() -> dict:
 
     with SessionLocal() as s:
         source = get_provider().name
-        out = thin_history(s, source, utcnow())
+        out: dict = {}
+        exported = None
+        try:
+            from .archive import get_archive
+            from .history import drop_exported, export_pending, exported_days
+
+            archive = get_archive()
+            if archive is not None:
+                # every finished day goes to the history store first; only then is it thinned or dropped
+                out["history"] = export_pending(s, source, utcnow(), archive)
+                exported = exported_days(s, source)
+        except Exception:
+            log.exception("history export failed: nothing is thinned or dropped until it works")
+            s.rollback()
+            return {"history": "failed"}
+        out.update(thin_history(s, source, utcnow(), exported=exported))
         out["arrivals"] = trim_arrivals(s, source)
+        if exported is not None:
+            out["dropped"] = drop_exported(s, source, utcnow())
         return out
 
 

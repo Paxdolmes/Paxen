@@ -65,6 +65,7 @@ PAXEN_RUN_WORKERS=0
    PAXEN_RECORD_MODES=tube,overground,elizabeth-line,tram
    PAXEN_PREDICTION_RETENTION_DAYS=0   # keep every day (0); a number deletes days older than that
    PAXEN_DB_PAUSE_MB=4200              # disk safety switch: see Costs; raise it with a bigger volume
+   PAXEN_DB_KEEP_DAYS=0                # days the database keeps once a day is safely in the history store (0: all)
    PAXEN_ARCHIVE_URL=s3://paxen-raw/london
    AWS_ACCESS_KEY_ID=<R2 Access Key ID>
    AWS_SECRET_ACCESS_KEY=<R2 Secret Access Key>
@@ -149,6 +150,11 @@ Measured on live data (3 Nov 2026):
   (`PAXEN_PREDICTION_RETENTION_DAYS`, default 60): 60 days ~10 GB, 30 days ~6 GB, 14 days ~4 GB. `/v1/health` shows the
   live size (`data.db_mb`). Railway's Hobby plan caps a volume at 5 GB; Pro starts at 50 GB. Postgres reuses the space
   of deleted rows but doesn't hand it back to the disk, so the on-disk size never shrinks by itself.
+- **History store** (`backend/paxen/history.py`): each finished London day is written to R2 as compressed Parquet
+  (`history/tfl/<table>/<day>.parquet`), read back and checked, before it may be thinned. About a tenth of its
+  Postgres size, kept permanently. `PAXEN_DB_KEEP_DAYS` then lets the database drop days older than that which are
+  safely stored (0, the default, keeps them all). The countdown model's evaluation reads the database, so keep at
+  least 10 days there.
 - **Disk safety switch** (`PAXEN_DB_PAUSE_MB`, default 4200 for the 5 GB Hobby volume; 0 turns it off). A full disk
   stops every write and can stop Postgres, so over this size the worker stops saving train data to the database
   and keeps everything else running. The raw responses still go to the R2 archive, so those hours can be rebuilt.

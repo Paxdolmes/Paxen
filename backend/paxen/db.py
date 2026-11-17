@@ -250,6 +250,23 @@ class DaySample(Base):
     arrivals_trimmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class ExportedDay(Base):
+    """One London day of one table, written to the history store (R2) and read back to check it (paxen/history.py).
+    The database copy of a day may only be thinned or dropped once all its tables are here."""
+    __tablename__ = "exported_days"
+    source: Mapped[str] = mapped_column(String(10), primary_key=True)
+    table: Mapped[str] = mapped_column(String(40), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # London date, YYYY-MM-DD
+    key: Mapped[str] = mapped_column(String(300))
+    rows: Mapped[int] = mapped_column(Integer)
+    bytes: Mapped[int] = mapped_column(Integer)
+    # True when the database copy had already been thinned before export (days before history existed): a sample,
+    # not every row. Those days' raw responses are in the archive, so they can be rebuilt in full.
+    partial: Mapped[bool] = mapped_column(Boolean, default=False)
+    exported_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    dropped: Mapped[bool] = mapped_column(Boolean, default=False)  # the database copy has since been dropped
+
+
 class AppSecret(Base):
     """Server-generated secrets that must survive restarts and be shared by the API and worker (VAPID keys)."""
     __tablename__ = "app_secrets"
