@@ -87,3 +87,32 @@ If it fails, the best baseline that beats rules on conditions 1–3 may replace 
 - Platform to platform: walking to and from stations is the planner's time and not modelled.
 - Users' own commutes aren't the panel; their legs on panel lines inherit the model, and their own trips
   (automatic trips) check it.
+
+## Amendment 1 (17 November 2026): tracking outages
+
+**What had been seen.** The first replayed day's summary only (4 November, rebuilt from the raw archive):
+358 of 400 journeys measured, 49% of departures answered, real minus planned p50 +4.9 and p90 +35.2. No
+evaluation had run, no candidate had been scored, and nothing about any journey's individual times had been
+looked at.
+
+**Why.** A p90 of 35 minutes over planned on an ordinary day isn't plausible. The likely reason is that the
+replay can't tell "no train came" from "nothing was being recorded". On 4 November, Trackernet responses were
+only archived from partway through the day. A departure shortly before that point waits until the first train
+recorded afterwards, which looks like a long delay.
+
+**The rule.** A departure is **unusable** (`outage`) if, at any point between leaving and arriving, the whole
+network's tracking was silent for more than **3 minutes**, meaning no measured arrival on any line. That
+includes before the first and after the last arrival recorded that day. While the Tube runs, some train
+reaches some platform every few seconds, so a silence that long means the recorder or the feed was down. A
+suspension on one line doesn't silence the network, so real delays stay in the ground truth.
+
+**Also changed.**
+- Each day's summary now records:
+  - when tracking ran;
+  - the silent minutes between 06:00 and 22:00;
+  - outages, counted apart from tracking gaps;
+  - real minus planned by each journey's first line.
+- A sort that crashed on arrivals with no recorded direction (16 November) is fixed.
+
+**Re-run.** The replay rules have a version number (`replay.VERSION`, now 2). Every day replayed under an older
+version is replayed again, and the evaluation scores every test day again from scratch.

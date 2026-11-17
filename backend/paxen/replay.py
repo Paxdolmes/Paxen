@@ -16,6 +16,10 @@ Rules (written down before any results were seen; see docs/journey-model.md):
   your platform before the train you boarded, we can't tell whether it would have taken you, so that departure is
   marked `gap` too (otherwise lines with many of them, like the Metropolitan, would look slower than they are).
 - No train within MAX_WAIT_MIN: no answer for that departure (service suspended, or no tracking).
+- Amendment 1 (17 Nov 2026): if the whole network's tracking went silent for more than SILENT_MIN (no measured
+  arrival on any line) at any point between leaving and arriving, the recorder or the feed was down: the
+  departure is marked `outage` and isn't used. A suspension on one line doesn't silence the network, so real
+  delays are kept.
 """
 from __future__ import annotations
 
@@ -34,6 +38,8 @@ log = logging.getLogger("paxen.replay")
 BOARD_SLACK_S = 20
 MAX_WAIT_MIN = 60
 MAX_RIDE_FACTOR, MAX_RIDE_EXTRA_MIN = 3.0, 15.0
+SILENT_MIN = 3  # the whole Tube never goes this long without a train reaching some platform, while it runs
+VERSION = 2  # of these rules; days replayed under an older version are replayed again (and re-evaluated)
 DEPART_FROM, DEPART_TO, DEPART_STEP_MIN = "06:00", "22:00", 5
 
 
@@ -54,17 +60,36 @@ class Index:
         at_stop: dict[tuple, list] = defaultdict(list)
         by_train: dict[tuple, list] = defaultdict(list)
         unknown: dict[tuple, list] = defaultdict(list)
+        every: list[datetime] = []
         for line, stop, veh, direction, t in arrivals:
-            if veh in PLACEHOLDER_VEHICLE_IDS:
+            every.append(t)
+            if veh is None or veh in PLACEHOLDER_VEHICLE_IDS:
                 unknown[(line, stop)].append(t)
                 continue
             at_stop[(line, stop)].append((t, veh, direction))
             by_train[(line, veh)].append((t, stop, direction))
-        self.at_stop = {k: sorted(v) for k, v in at_stop.items()}
+
+        def order(x):  # by time; ties by the rest, where a missing direction sorts first (and can't break a sort)
+            return x[0], x[1] or "", x[2] or ""
+
+        self.at_stop = {k: sorted(v, key=order) for k, v in at_stop.items()}
         self.times = {k: [x[0] for x in v] for k, v in self.at_stop.items()}
-        self.by_train = {k: sorted(v) for k, v in by_train.items()}
+        self.by_train = {k: sorted(v, key=order) for k, v in by_train.items()}
         self.train_times = {k: [x[0] for x in v] for k, v in self.by_train.items()}
         self.unknown = {k: sorted(v) for k, v in unknown.items()}
+        # Silences: stretches longer than SILENT_MIN with no measured arrival anywhere (before the first and after
+        # the last arrival of the data included)
+        every.sort()
+        quiet = timedelta(minutes=SILENT_MIN)
+        self.silences = ([(datetime.min, every[0])] if every else [(datetime.min, datetime.max)]) + \
+            [(a, b) for a, b in zip(every, every[1:]) if b - a > quiet] + ([(every[-1], datetime.max)] if every else [])
+        self._silence_ends = [b for _, b in self.silences]
+        self.first, self.last = (every[0], every[-1]) if every else (None, None)
+
+    def silent_between(self, a: datetime, b: datetime) -> bool:
+        """Was the whole network's tracking silent (for more than SILENT_MIN) at any point in [a, b]?"""
+        k = bisect.bisect_right(self._silence_ends, a)
+        return k < len(self.silences) and self.silences[k][0] < b
 
     def unknown_between(self, line: str, stop: str, a: datetime, b: datetime) -> bool:
         """Did an unidentified train reach this platform in [a, b)?"""
@@ -127,8 +152,10 @@ def journey_time(idx: Index, legs: list[dict], depart: datetime) -> dict | None:
         let_go += r.let_go
         gap = gap or r.gap
         t = max(t, r.arrive)
+    outage = idx.silent_between(depart - timedelta(seconds=BOARD_SLACK_S), t)
     return {"minutes": round((t - depart).total_seconds() / 60, 2), "wait": round(wait, 2),
-            "ride": round(riding, 2), "walk": round(walking, 2), "let_go": let_go, "gap": gap}
+            "ride": round(riding, 2), "walk": round(walking, 2), "let_go": let_go, "gap": gap or outage,
+            "outage": outage}
 
 
 def departures(day: str) -> list[datetime]:
@@ -156,23 +183,50 @@ def replay_day(idx: Index, panel: list[dict], day: str) -> list[dict]:
             res = journey_time(idx, j["legs"], dep)
             rows.append({"day": day, "journey": j["id"], "depart": dep, "planned_min": planned,
                          **(res or {"minutes": None, "wait": None, "ride": None, "walk": None, "let_go": None,
-                                    "gap": None})})
+                                    "gap": None, "outage": None})})
     return rows
 
 
-def summarise(rows: list[dict], panel: list[dict]) -> dict:
+def _spread(xs: list[float]) -> dict | None:
+    import statistics
+
+    if not xs:
+        return None
+    s = sorted(xs)
+    return {"p10": round(s[len(s) // 10], 1), "p50": round(statistics.median(s), 1), "p90": round(s[len(s) * 9 // 10], 1)}
+
+
+def summarise(rows: list[dict], panel: list[dict], idx: Index | None = None, day: str | None = None) -> dict:
+    """A day's replay at a glance: how much was measured, and real minutes against planned, overall and by the
+    journey's first line. With the day's Index: when tracking ran, and how long it was silent in service hours."""
     import statistics
 
     good = [r for r in rows if r["minutes"] is not None and not r["gap"]]
-    over = [r["minutes"] - r["planned_min"] for r in good]
-    return {
+    first_line = {j["id"]: next((l["line_id"] for l in j["legs"] if "line_id" in l), None) for j in panel}
+    by_line: dict[str, list[float]] = defaultdict(list)
+    for r in good:
+        by_line[first_line.get(r["journey"])].append(r["minutes"] - r["planned_min"])
+    out = {
+        "version": VERSION,
         "journeys_in_panel": len(panel), "journeys_measured": len({r["journey"] for r in rows}),
         "departures": len(rows), "answered": len([r for r in rows if r["minutes"] is not None]),
-        "gaps": len([r for r in rows if r["gap"]]), "usable": len(good),
-        "minutes_over_planned": ({"p10": round(sorted(over)[len(over) // 10], 1), "p50": round(statistics.median(over), 1),
-                                  "p90": round(sorted(over)[len(over) * 9 // 10], 1)} if over else None),
+        "gaps": len([r for r in rows if r["gap"] and not r.get("outage")]),
+        "outages": len([r for r in rows if r.get("outage")]), "usable": len(good),
+        "minutes_over_planned": _spread([r["minutes"] - r["planned_min"] for r in good]),
         "wait_median": round(statistics.median(r["wait"] for r in good), 1) if good else None,
+        "by_first_line": {k: {"usable": len(v), **(_spread(v) or {})} for k, v in sorted(by_line.items(), key=str)},
     }
+    if idx is not None and day is not None and idx.first is not None:
+        deps = departures(day)
+        lo, hi = deps[0], deps[-1]
+        silent = sum(max(timedelta(0), min(b, hi) - max(a, lo)).total_seconds() for a, b in idx.silences) / 60
+
+        def clock(t):
+            return t.replace(tzinfo=timezone.utc).astimezone(LONDON).strftime("%H:%M")
+
+        out["tracked"] = {"from": clock(idx.first), "to": clock(idx.last),
+                          "silent_min_06_22": round(silent, 1)}
+    return out
 
 
 def load_panel() -> list[dict]:
@@ -192,6 +246,14 @@ def _arrivals_from_store(archive, source: str, day: str):
     cols = {c: t.column(c).to_pylist() for c in t.column_names}
     return [(cols["line_id"][i], cols["stop_id"][i], cols["vehicle_id"][i], cols["direction"][i], cols["arrived_at"][i])
             for i in range(t.num_rows) if cols["method"][i] == "trackernet"]
+
+
+def _forget_cached(key: str) -> None:
+    """A replayed day's file can be replaced (new rules): drop any local copy history.read_day cached."""
+    import os
+    from pathlib import Path
+
+    (Path(os.getenv("PAXEN_HISTORY_CACHE", "/tmp/paxen-history")) / key).unlink(missing_ok=True)
 
 
 def replay_pending(s, source: str, archive, max_days: int = 2, on_day=None) -> dict:
@@ -214,26 +276,35 @@ def replay_pending(s, source: str, archive, max_days: int = 2, on_day=None) -> d
         ExportedDay.source == source, ExportedDay.table == "observed_arrivals", ExportedDay.partial.is_(False),
         ExportedDay.rows > 0)
         .order_by(ExportedDay.day))]
-    done = {d for (d,) in s.execute(select(ExportedDay.day).where(
-        ExportedDay.source == source, ExportedDay.table == "journey_times"))}
     row = s.get(AppSecret, REPORT)
     report = json.loads(row.value) if row else {"days": {}}
+    if report.get("version") != VERSION:  # the rules changed: every day is replayed again under the new ones
+        s.query(ExportedDay).filter(ExportedDay.source == source, ExportedDay.table == "journey_times").delete()
+        report = {"version": VERSION, "days": {}}
+        if row is None:
+            row = AppSecret(name=REPORT, value="")
+            s.add(row)
+        row.value = json.dumps(report)
+        s.commit()
+    done = {d for (d,) in s.execute(select(ExportedDay.day).where(
+        ExportedDay.source == source, ExportedDay.table == "journey_times"))}
     for day in [d for d in full if d not in done][:max_days]:
         if on_day:
             on_day(day)
-        rows = replay_day(Index(_arrivals_from_store(archive, source, day)), panel, day)
+        idx = Index(_arrivals_from_store(archive, source, day))
+        rows = replay_day(idx, panel, day)
         buf = io.BytesIO()
         pq.write_table(pa.Table.from_pylist(rows), buf, compression="zstd")
         key = key_for(source, "journey_times", day)
         archive.put_bytes(key, buf.getvalue())
+        _forget_cached(key)
         s.add(ExportedDay(source=source, table="journey_times", day=day, key=key, rows=len(rows),
                           bytes=len(buf.getvalue())))
-        report["days"][day] = summarise(rows, panel)
+        report["days"][day] = summarise(rows, panel, idx, day)
         out["days"].append(day)
-        value = json.dumps(report)
         if row is None:
-            row = AppSecret(name=REPORT, value=value)
+            row = AppSecret(name=REPORT, value="")
             s.add(row)
-        row.value = value
+        row.value = json.dumps(report)
         s.commit()  # a day at a time: a run cut short keeps the days it finished
     return out
