@@ -854,6 +854,22 @@ def model_report(u: User = Depends(current_user), s: Session = Depends(db)):
             "metrics": mv.metrics}
 
 
+@app.get("/v1/journeys/report")
+def journeys_report(u: User = Depends(current_user), s: Session = Depends(db)):
+    """How the journey replay (paxen/replay.py) went for each day (coverage, gaps, real times against planned), and
+    the journey model's pre-registered evaluation (paxen/journey_eval.py)."""
+    import json
+
+    from .db import AppSecret
+    from .replay import REPORT
+
+    from .journey_eval import REPORT as EVAL
+
+    row, ev = s.get(AppSecret, REPORT), s.get(AppSecret, EVAL)
+    return {"replay": json.loads(row.value) if row else {"days": {}},
+            "evaluation": json.loads(ev.value) if ev else {"status": "not run yet"}}
+
+
 @app.get("/v1/insights")
 def get_insights(u: User = Depends(current_user), s: Session = Depends(db)):
     return build_insights(s, u.id, now(), get_provider().name)

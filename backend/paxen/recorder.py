@@ -333,7 +333,7 @@ _AT_PLATFORM: dict[tuple, datetime] = {}  # (station, line code, set number, pla
 
 
 def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archive=None,
-                      present: dict | None = None, store: bool = True) -> dict:
+                      present: dict | None = None, store: bool = True, keep_raw: bool = True) -> dict:
     """Measured Tube arrivals: every train first seen 'At Platform', timed by the signalling system.
 
     A train waiting at a terminus stays 'At Platform' for many minutes and its timestamp can change while it sits
@@ -393,7 +393,7 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
                                       earliest=arrived - timedelta(seconds=15), latest=arrived + timedelta(seconds=15),
                                       method="trackernet", quality=1.0))
                 created += 1
-    if raws:  # one archive object per cycle for all lines (keeps storage requests low)
+    if raws and keep_raw:  # one archive object per cycle for all lines (keeps storage requests low)
         archive_raw(source, "trackernet", now, json.dumps(raws), archive)
     s.commit()
     return {"measured_arrivals": created, "unmapped": unmapped, "failed_lines": failed}

@@ -66,6 +66,17 @@ def train_once() -> None:
     log.info("train: %s | peak memory %s MB", res, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)
 
 
+def journeys_once() -> None:
+    """The journey model's daily evaluation, in its own process (docs/journey-model.md)."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    init_db()
+    res = workers.journeys_tick()
+    import resource
+
+    logging.getLogger("paxen.journeys").info("journeys: %s | peak memory %s MB", res,
+                                             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)
+
+
 def thin_once() -> None:
     """One storage-thinning run, in its own process (started by the worker every 2 hours)."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -81,5 +92,7 @@ if __name__ == "__main__":
         train_once()
     elif "--thin-once" in sys.argv:
         thin_once()
+    elif "--journeys-once" in sys.argv:
+        journeys_once()
     else:
         asyncio.run(main())

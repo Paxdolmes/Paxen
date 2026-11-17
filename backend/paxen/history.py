@@ -228,3 +228,99 @@ def read_day(archive, source: str, table: str, day: str, columns: list[str] | No
         tmp.write_bytes(archive.get_bytes(key))
         tmp.replace(cache)
     return pq.read_table(cache, columns=columns)
+
+
+# ------------------------------------------------------------------ rebuilding thinned days from the raw archive
+REBUILT = "trackernet_rebuild"  # exported_days marker: this day's measured arrivals were rebuilt (rows: how many)
+
+
+def rebuild_trackernet_day(archive, tn, source: str, day: str) -> list[tuple] | None:
+    """A day's measured Tube arrivals, rebuilt from the raw Trackernet responses in the archive by running them
+    through the recorder's own logic (recorder.record_trackernet) in a scratch database. None: none archived."""
+    import gzip
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from .db import Base
+    from .recorder import record_trackernet
+    from .trackernet import parse_summary
+
+    a, b = _day_bounds(day)
+    keys = []
+    for utc_day in sorted({str(a.date()), str((b - timedelta(seconds=1)).date())}):
+        keys += [k for k in archive.list_keys(f"raw/{source}/{utc_day}/") if "/trackernet-" in k]
+    if not keys:
+        return None
+    eng = create_engine("sqlite://")
+    Base.metadata.create_all(eng)
+    scratch = sessionmaker(bind=eng, expire_on_commit=False)()
+    present: dict = {}
+
+    class Replayed:
+        """Stands in for the Trackernet client: answers each poll from the archived responses."""
+        raws: dict = {}
+
+        def summary(self, code):
+            raw = self.raws[code].encode()  # a line missing from this poll: KeyError, logged as a failed line
+            ts, trains = parse_summary(raw, code)
+            return ts, trains, raw
+
+        def station_map(self, code, names):
+            return tn.station_map(code, names)
+
+    poll = Replayed()
+    for key in keys:  # sorted by time: raw/<source>/<date>/<HH>/trackernet-<HHMMSS>.json.gz
+        date, _, name = key.split("/")[-3:]
+        hhmmss = name.removesuffix(".json.gz").rsplit("-", 1)[-1]
+        when = datetime.strptime(f"{date} {hhmmss}", "%Y-%m-%d %H%M%S")
+        if not (a - timedelta(minutes=30) <= when < b):
+            continue
+        poll.raws = json.loads(gzip.decompress(archive.get_bytes(key)))
+        record_trackernet(scratch, poll, when.replace(tzinfo=timezone.utc), source, present=present, keep_raw=False)
+    rows = [(o.source, o.stop_id, o.line_id, o.vehicle_id, o.direction, o.arrived_at, o.earliest, o.latest)
+            for o in scratch.query(ObservedArrival).filter(ObservedArrival.arrived_at >= a,
+                                                           ObservedArrival.arrived_at < b)]
+    scratch.close()
+    eng.dispose()
+    return rows
+
+
+def rebuild_pending(s: Session, source: str, archive, tn, max_days: int = 1) -> dict:
+    """Worker: for days exported `partial` (thinned before the store existed), rebuild every measured Tube arrival
+    from the raw archive and replace the day's observed_arrivals file with them (Darwin and inferred arrivals
+    that were kept are carried over). One day per run: about 3,000 archived responses each."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    out: dict = {"days": []}
+    if archive is None or tn is None:
+        return out
+    done = {d for (d,) in s.execute(select(ExportedDay.day).where(ExportedDay.source == source,
+                                                                  ExportedDay.table == REBUILT))}
+    partial = s.scalars(select(ExportedDay).where(ExportedDay.source == source, ExportedDay.partial.is_(True),
+                                                  ExportedDay.table == "observed_arrivals")
+                        .order_by(ExportedDay.day)).all()
+    for rec in [r for r in partial if r.day not in done][:max_days]:
+        rows = rebuild_trackernet_day(archive, tn, source, rec.day)
+        n = 0
+        if rows:
+            old = pq.read_table(io.BytesIO(archive.get_bytes(rec.key)))
+            keep = old.filter(pa.compute.not_equal(old.column("method"), "trackernet"))
+            cols = ("source", "stop_id", "line_id", "vehicle_id", "direction", "arrived_at", "earliest", "latest")
+            new = pa.Table.from_pylist(
+                [{**{c: None for c in keep.column_names}, **dict(zip(cols, r)), "method": "trackernet", "quality": 1.0}
+                 for r in rows], schema=keep.schema)
+            merged = pa.concat_tables([keep, new])
+            buf = io.BytesIO()
+            pq.write_table(merged, buf, compression="zstd")
+            archive.put_bytes(rec.key, buf.getvalue())
+            back = pq.ParquetFile(io.BytesIO(archive.get_bytes(rec.key))).metadata.num_rows
+            if back != merged.num_rows:
+                raise RuntimeError(f"rebuild check failed for {rec.key}")
+            rec.rows, rec.bytes, rec.partial, n = merged.num_rows, len(buf.getvalue()), False, len(rows)
+            cache = Path(os.getenv("PAXEN_HISTORY_CACHE", "/tmp/paxen-history")) / rec.key
+            cache.unlink(missing_ok=True)
+        s.add(ExportedDay(source=source, table=REBUILT, day=rec.day, key="", rows=n, bytes=0))
+        s.commit()
+        out["days"].append({"day": rec.day, "arrivals": n})
+    return out
