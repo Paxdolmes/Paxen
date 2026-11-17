@@ -162,49 +162,139 @@ def train_tick() -> dict:
         return res
 
 
+THIN_STATUS = "thin_status"  # AppSecret: where the latest storage/history run is (shown on /v1/journeys/report)
+
+
+class Progress:
+    """Where a long background run is, saved as it goes: the run takes an hour or more in a child process and its
+    log is only on the host, so this is how anyone can see what it is doing, how long each step took, and what
+    failed. Writes use their own session, so they never mix with the run's own transactions."""
+
+    def __init__(self, name: str = THIN_STATUS):
+        import time
+
+        self.name, self._clock = name, time.monotonic
+        self.state: dict = {"started_at": utcnow().isoformat(), "step": None, "steps": {}, "errors": {},
+                            "finished_at": None}
+        self._t = self._clock()
+        self.previous = self._load()
+        self._save()
+
+    def _load(self):
+        import json
+
+        from .db import AppSecret
+
+        try:
+            with SessionLocal() as s:
+                row = s.get(AppSecret, self.name)
+                return json.loads(row.value).get("run") if row else None
+        except Exception:
+            return None
+
+    def _save(self) -> None:
+        import json
+
+        from .db import AppSecret
+
+        value = json.dumps({"run": self.state, "previous": self.previous}, default=str)
+        try:
+            with SessionLocal() as s:
+                row = s.get(AppSecret, self.name)
+                if row:
+                    row.value = value
+                else:
+                    s.add(AppSecret(name=self.name, value=value))
+                s.commit()
+        except Exception:
+            log.exception("could not save progress")
+
+    def step(self, name: str | None) -> None:
+        now = self._clock()
+        if self.state["step"]:
+            self.state["steps"][self.state["step"]] = round(now - self._t, 1)
+        self.state["step"], self._t = name, now
+        self._save()
+
+    def failed(self, e: Exception) -> None:
+        import re
+
+        msg = re.sub(r"\w+://\S+", "<url>", str(e))[:300]  # no hostnames or bucket addresses
+        self.state["errors"][self.state["step"] or "run"] = f"{type(e).__name__}: {msg}"
+        self._save()
+
+    def finish(self, result: dict) -> None:
+        self.step(None)
+        self.state["finished_at"], self.state["result"] = utcnow().isoformat(), result
+        self._save()
+
+
 def thin_tick() -> dict:
-    """Storage: thin old days of predictions to the sample the evaluation reads (evaluate.thin_history), then drop
-    those days' arrivals that no remaining prediction can pair with (evaluate.trim_arrivals). Neither changes what
-    training or evaluation read."""
+    """Storage and history, every 2 hours. In order:
+      1. export every finished day to the history store (paxen/history.py); nothing below runs if this fails;
+      2. replay the journey panel on the newly exported days (paxen/replay.py): real journey times, quick;
+      3. thin old days of predictions to the sample the evaluation reads (evaluate.thin_history) and drop arrivals
+         no remaining prediction can pair with (evaluate.trim_arrivals); neither changes what training reads;
+      4. with PAXEN_DB_KEEP_DAYS set, drop the database copy of old days already safely in the store;
+      5. rebuild days thinned before the store existed from the raw archive (slow: thousands of responses a day),
+         then replay those too."""
     from .evaluate import thin_history, trim_arrivals
 
+    prog = Progress()
     with SessionLocal() as s:
         source = get_provider().name
         out: dict = {}
-        exported = None
+        exported = archive = None
         try:
             from .archive import get_archive
-            from .history import drop_exported, export_pending, exported_days
+            from .history import export_pending, exported_days
 
             archive = get_archive()
             if archive is not None:
                 # every finished day goes to the history store first; only then is it thinned or dropped
-                out["history"] = export_pending(s, source, utcnow(), archive)
+                prog.step("export")
+                out["history"] = export_pending(s, source, utcnow(), archive,
+                                                on_table=lambda day, table: prog.step(f"export {day} {table}"))
                 exported = exported_days(s, source)
-        except Exception:
+        except Exception as e:
             log.exception("history export failed: nothing is thinned or dropped until it works")
+            prog.failed(e)
             s.rollback()
+            prog.finish({"history": "failed"})
             return {"history": "failed"}
-        out.update(thin_history(s, source, utcnow(), exported=exported))
-        out["arrivals"] = trim_arrivals(s, source)
+
+        def guarded(name: str, fn):
+            prog.step(name)
+            try:
+                return fn()
+            except Exception as e:
+                log.exception("%s failed", name)
+                prog.failed(e)
+                s.rollback()
+                return "failed"
+
+        def replay():
+            from .replay import replay_pending
+
+            return replay_pending(s, source, archive, max_days=4,
+                                  on_day=lambda day: prog.step(f"replay {day}"))
+
         if exported is not None:
-            out["dropped"] = drop_exported(s, source, utcnow())
-            try:
-                from .history import rebuild_pending
-                from .trackernet import from_env
+            out["replay"] = guarded("replay", replay)  # real journey times for the journey model
+        thinned = guarded("thin", lambda: thin_history(s, source, utcnow(), exported=exported))
+        out.update(thinned if isinstance(thinned, dict) else {"thin": thinned})
+        out["arrivals"] = guarded("trim arrivals", lambda: trim_arrivals(s, source))
+        if exported is not None:
+            from .history import drop_exported, rebuild_pending
+            from .trackernet import from_env
 
-                # days thinned before the store existed: every measured Tube arrival, rebuilt from the raw archive
-                out["rebuilt"] = rebuild_pending(s, source, archive, from_env(), max_days=2)
-            except Exception:
-                log.exception("rebuilding arrivals from the archive failed")
-                s.rollback()
-            try:
-                from .replay import replay_pending
-
-                out["replay"] = replay_pending(s, source, archive)  # real journey times for the journey model
-            except Exception:
-                log.exception("journey replay failed")
-                s.rollback()
+            out["dropped"] = guarded("drop", lambda: drop_exported(s, source, utcnow()))
+            # days thinned before the store existed: every measured Tube arrival, rebuilt from the raw archive
+            out["rebuilt"] = guarded("rebuild", lambda: rebuild_pending(
+                s, source, archive, from_env(), max_days=2, on_day=lambda day: prog.step(f"rebuild {day}")))
+            if isinstance(out["rebuilt"], dict) and out["rebuilt"]["days"]:
+                out["replay_rebuilt"] = guarded("replay rebuilt", replay)
+        prog.finish(out)
         return out
 
 

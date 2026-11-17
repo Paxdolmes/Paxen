@@ -169,3 +169,25 @@ def test_a_thinned_day_is_rebuilt_from_the_raw_archive_exactly_as_recorded(sessi
     rec = session.query(ExportedDay).filter(ExportedDay.day == "2026-11-09", ExportedDay.table == "observed_arrivals").one()
     assert rec.partial is False and rec.rows == 4
     assert history.rebuild_pending(session, "tfl", archive, Live(""))["days"] == []  # once
+
+
+def test_prefetch_keeps_order_and_bounds_what_is_held():
+    import threading
+    import time
+
+    from paxen.history import prefetch
+
+    running, peak, lock = [0], [0], threading.Lock()
+
+    def fetch(k):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.002 * (k % 3))  # out-of-order completion
+        with lock:
+            running[0] -= 1
+        return k * 10
+
+    assert list(prefetch(fetch, list(range(200)), workers=4, ahead=8)) == [k * 10 for k in range(200)]
+    assert peak[0] <= 4
+    assert list(prefetch(fetch, [])) == [] and list(prefetch(fetch, [1, 2])) == [10, 20]

@@ -141,7 +141,8 @@ def exported_days(s: Session, source: str) -> set[str]:
     return {d for d, ts in have.items() if ts >= set(TABLES)}
 
 
-def export_pending(s: Session, source: str, now: datetime, archive, max_days: int = DAYS_PER_RUN) -> dict:
+def export_pending(s: Session, source: str, now: datetime, archive, max_days: int = DAYS_PER_RUN,
+                   on_table=None) -> dict:
     """Export every finished day not yet in the store (oldest first), and check each file by reading it back."""
     import pyarrow.parquet as pq
 
@@ -165,6 +166,8 @@ def export_pending(s: Session, source: str, now: datetime, archive, max_days: in
         if not missing:
             continue
         for table in missing:
+            if on_table:
+                on_table(day, table)
             model, dated = TABLES[table]
             data, rows = export_table(s, model, dated, source, day)
             key = key_for(source, table, day)
@@ -231,6 +234,26 @@ def read_day(archive, source: str, table: str, day: str, columns: list[str] | No
 
 
 # ------------------------------------------------------------------ rebuilding thinned days from the raw archive
+def prefetch(fetch, keys: list, workers: int = 8, ahead: int = 32):
+    """fetch(key) for each key, in order, with up to `ahead` downloads running in the background: a day is
+    thousands of small objects, and one at a time it is the round trips that take the time. Memory stays bounded."""
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(workers) as ex:
+        it, queue = iter(keys), deque()
+        for k in it:
+            queue.append(ex.submit(fetch, k))
+            if len(queue) >= ahead:
+                break
+        while queue:
+            body = queue.popleft().result()
+            k = next(it, None)
+            if k is not None:
+                queue.append(ex.submit(fetch, k))
+            yield body
+
+
 REBUILT = "trackernet_rebuild"  # exported_days marker: this day's measured arrivals were rebuilt (rows: how many)
 
 
@@ -268,14 +291,15 @@ def rebuild_trackernet_day(archive, tn, source: str, day: str) -> list[tuple] | 
         def station_map(self, code, names):
             return tn.station_map(code, names)
 
-    poll = Replayed()
-    for key in keys:  # sorted by time: raw/<source>/<date>/<HH>/trackernet-<HHMMSS>.json.gz
+    def when_of(key):  # raw/<source>/<date>/<HH>/trackernet-<HHMMSS>.json.gz
         date, _, name = key.split("/")[-3:]
-        hhmmss = name.removesuffix(".json.gz").rsplit("-", 1)[-1]
-        when = datetime.strptime(f"{date} {hhmmss}", "%Y-%m-%d %H%M%S")
-        if not (a - timedelta(minutes=30) <= when < b):
-            continue
-        poll.raws = json.loads(gzip.decompress(archive.get_bytes(key)))
+        return datetime.strptime(f"{date} {name.removesuffix('.json.gz').rsplit('-', 1)[-1]}", "%Y-%m-%d %H%M%S")
+
+    poll = Replayed()
+    wanted = [(when_of(k), k) for k in keys]
+    wanted = sorted((w, k) for w, k in wanted if a - timedelta(minutes=30) <= w < b)
+    for (when, _), body in zip(wanted, prefetch(archive.get_bytes, [k for _, k in wanted])):
+        poll.raws = json.loads(gzip.decompress(body))
         record_trackernet(scratch, poll, when.replace(tzinfo=timezone.utc), source, present=present, keep_raw=False)
     rows = [(o.source, o.stop_id, o.line_id, o.vehicle_id, o.direction, o.arrived_at, o.earliest, o.latest)
             for o in scratch.query(ObservedArrival).filter(ObservedArrival.arrived_at >= a,
@@ -285,7 +309,7 @@ def rebuild_trackernet_day(archive, tn, source: str, day: str) -> list[tuple] | 
     return rows
 
 
-def rebuild_pending(s: Session, source: str, archive, tn, max_days: int = 1) -> dict:
+def rebuild_pending(s: Session, source: str, archive, tn, max_days: int = 1, on_day=None) -> dict:
     """Worker: for days exported `partial` (thinned before the store existed), rebuild every measured Tube arrival
     from the raw archive and replace the day's observed_arrivals file with them (Darwin and inferred arrivals
     that were kept are carried over). One day per run: about 3,000 archived responses each."""
@@ -301,6 +325,8 @@ def rebuild_pending(s: Session, source: str, archive, tn, max_days: int = 1) -> 
                                                   ExportedDay.table == "observed_arrivals")
                         .order_by(ExportedDay.day)).all()
     for rec in [r for r in partial if r.day not in done][:max_days]:
+        if on_day:
+            on_day(rec.day)
         rows = rebuild_trackernet_day(archive, tn, source, rec.day)
         n = 0
         if rows:

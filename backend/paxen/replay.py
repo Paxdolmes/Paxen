@@ -194,7 +194,7 @@ def _arrivals_from_store(archive, source: str, day: str):
             for i in range(t.num_rows) if cols["method"][i] == "trackernet"]
 
 
-def replay_pending(s, source: str, archive, max_days: int = 2) -> dict:
+def replay_pending(s, source: str, archive, max_days: int = 2, on_day=None) -> dict:
     """Worker (after each history export): replay the panel on every fully exported day not yet replayed, store
     the journey times (history/<source>/journey_times/<day>.parquet) and update the report."""
     import io
@@ -219,6 +219,8 @@ def replay_pending(s, source: str, archive, max_days: int = 2) -> dict:
     row = s.get(AppSecret, REPORT)
     report = json.loads(row.value) if row else {"days": {}}
     for day in [d for d in full if d not in done][:max_days]:
+        if on_day:
+            on_day(day)
         rows = replay_day(Index(_arrivals_from_store(archive, source, day)), panel, day)
         buf = io.BytesIO()
         pq.write_table(pa.Table.from_pylist(rows), buf, compression="zstd")
@@ -228,11 +230,10 @@ def replay_pending(s, source: str, archive, max_days: int = 2) -> dict:
                           bytes=len(buf.getvalue())))
         report["days"][day] = summarise(rows, panel)
         out["days"].append(day)
-    if out["days"]:
         value = json.dumps(report)
-        if row:
-            row.value = value
-        else:
-            s.add(AppSecret(name=REPORT, value=value))
-    s.commit()
+        if row is None:
+            row = AppSecret(name=REPORT, value=value)
+            s.add(row)
+        row.value = value
+        s.commit()  # a day at a time: a run cut short keeps the days it finished
     return out
