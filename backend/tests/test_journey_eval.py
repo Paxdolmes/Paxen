@@ -1,5 +1,4 @@
 """The journey model's evaluation (paxen/journey_eval.py, docs/journey-model.md)."""
-import math
 import random
 from datetime import datetime, timedelta
 

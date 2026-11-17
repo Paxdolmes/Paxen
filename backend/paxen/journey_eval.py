@@ -13,7 +13,7 @@ import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from .timeutil import LONDON, naive_utc
+from .timeutil import LONDON
 
 log = logging.getLogger("paxen.journey_eval")
 
