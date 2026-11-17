@@ -20,6 +20,16 @@ Rules (written down before any results were seen; see docs/journey-model.md):
   arrival on any line) at any point between leaving and arriving, the recorder or the feed was down: the
   departure is marked `outage` and isn't used. A suspension on one line doesn't silence the network, so real
   delays are kept.
+- Amendment 2 (17 Nov 2026): Trackernet misses a train at about one station in eight, and some platforms
+  altogether (Oxford Circus on the Victoria line). Where a train was seen at two stations a few stops apart,
+  the stations between them on NUMBAT's map of the line are filled in (it passed them, at times spaced evenly
+  between the two sightings). And a train is followed only until it comes back to a station it already passed
+  on this ride: it turned round, so an arrival at your stop after that is on its way back, not your journey.
+- Also in Amendment 2: a train can be boarded while it is still at the platform, not only if it arrived after
+  you. When it leaves is estimated from where it was seen next, less the usual running time there (from trains
+  passing through). This matters at the ends of lines, where trains stand for several minutes. Of the trains
+  you could board, you take the one that gets you there first: at an end of the line, the one that leaves first
+  is not always the one that came in first.
 """
 from __future__ import annotations
 
@@ -39,7 +49,54 @@ BOARD_SLACK_S = 20
 MAX_WAIT_MIN = 60
 MAX_RIDE_FACTOR, MAX_RIDE_EXTRA_MIN = 3.0, 15.0
 SILENT_MIN = 3  # the whole Tube never goes this long without a train reaching some platform, while it runs
-VERSION = 2  # of these rules; days replayed under an older version are replayed again (and re-evaluated)
+FILL_MAX_STATIONS = 3  # at most this many stations missed between two sightings of a train are filled in
+FILL_MAX_MIN_PER_LINK = 4.0  # and only if it took no longer than this per link (no reversal or long stop between)
+MAX_STAND_MIN = 30  # longest a train is taken to stand at a platform in service (longer: out of service)
+VERSION = 3  # of these rules; days replayed under an older version are replayed again (and re-evaluated)
+
+
+def fill_missed(arrivals: list, nb=None) -> list:
+    """The arrivals plus the stations each train must have passed between two sightings without being seen there,
+    on NUMBAT's map of the line: only along one direction (no reversing), at most FILL_MAX_STATIONS, and only
+    when the time between the sightings fits. Times are spaced evenly between the two sightings."""
+    if nb is None:
+        from . import numbat
+
+        nb = numbat.get()
+    if nb is None:
+        return list(arrivals)
+    naptans: dict[tuple, list[str]] = defaultdict(list)
+    for key, codes in nb.stations.items():
+        for naptan, code in codes.items():
+            naptans[(key, code)].append(naptan)
+    trains: dict[tuple, list] = defaultdict(list)
+    for a in arrivals:
+        if a[2] is not None and a[2] not in PLACEHOLDER_VEHICLE_IDS:
+            trains[(a[0], a[2])].append(a)
+    paths: dict[tuple, list | None] = {}
+    out = list(arrivals)
+    for (line, veh), seen in trains.items():
+        key = nb.key_of(line)
+        if not key:
+            continue
+        seen.sort(key=lambda a: a[4])
+        for (_, s1, _, d1, t1), (_, s2, _, d2, t2) in zip(seen, seen[1:]):
+            c1, c2 = nb.code_of(key, s1), nb.code_of(key, s2)
+            if not c1 or not c2 or c1 == c2:
+                continue
+            k = (key, c1, c2)
+            if k not in paths:
+                paths[k] = nb._path(key, c1, c2)
+            path = paths[k]
+            if not path or not 2 <= len(path) <= FILL_MAX_STATIONS + 1:
+                continue  # next to each other, too far apart, or no way from one to the other without reversing
+            if t2 - t1 > timedelta(minutes=FILL_MAX_MIN_PER_LINK * len(path)):
+                continue
+            for i, (_, x) in enumerate(path[:-1], start=1):
+                tx = t1 + (t2 - t1) * i / len(path)
+                for stop in naptans.get((key, x), ()):
+                    out.append((line, stop, veh, d1 if d1 == d2 else None, tx))
+    return out
 DEPART_FROM, DEPART_TO, DEPART_STEP_MIN = "06:00", "22:00", 5
 
 
@@ -55,9 +112,11 @@ class Ride:
 class Index:
     """One day's measured arrivals: by platform (line, stop) and by train (line, set number), sorted by time."""
 
-    def __init__(self, arrivals):
-        """arrivals: (line_id, stop_id, vehicle_id, direction, arrived_at naive UTC)."""
-        at_stop: dict[tuple, list] = defaultdict(list)
+    def __init__(self, arrivals, fill: bool = True, nb=None):
+        """arrivals: (line_id, stop_id, vehicle_id, direction, arrived_at naive UTC). With `fill`, stations a
+        train was missed at are filled in (fill_missed)."""
+        if fill:
+            arrivals = fill_missed(arrivals, nb)
         by_train: dict[tuple, list] = defaultdict(list)
         unknown: dict[tuple, list] = defaultdict(list)
         every: list[datetime] = []
@@ -66,17 +125,42 @@ class Index:
             if veh is None or veh in PLACEHOLDER_VEHICLE_IDS:
                 unknown[(line, stop)].append(t)
                 continue
-            at_stop[(line, stop)].append((t, veh, direction))
             by_train[(line, veh)].append((t, stop, direction))
 
         def order(x):  # by time; ties by the rest, where a missing direction sorts first (and can't break a sort)
             return x[0], x[1] or "", x[2] or ""
 
-        self.at_stop = {k: sorted(v, key=order) for k, v in at_stop.items()}
-        self.times = {k: [x[0] for x in v] for k, v in self.at_stop.items()}
         self.by_train = {k: sorted(v, key=order) for k, v in by_train.items()}
         self.train_times = {k: [x[0] for x in v] for k, v in self.by_train.items()}
         self.unknown = {k: sorted(v) for k, v in unknown.items()}
+        # When each train left each station: where it was seen next, less the usual running time there (median
+        # of trains passing through, neither starting nor turning round; into an end of the line, the run the
+        # other way). A train that seems to stand longer than MAX_STAND_MIN was out of service: it left on arrival.
+        import statistics
+
+        runs: dict[tuple, list[float]] = defaultdict(list)
+        for (line, _), traj in self.by_train.items():
+            for (_, s0, _), (t1, s1, _), (t2, s2, _) in zip(traj, traj[1:], traj[2:]):
+                if s0 != s1 and s1 != s2 and s0 != s2:
+                    runs[(line, s1, s2)].append((t2 - t1).total_seconds())
+        run = {k: statistics.median(v) for k, v in runs.items() if len(v) >= 3}
+        stand = timedelta(minutes=MAX_STAND_MIN)
+        at_stop: dict[tuple, list] = defaultdict(list)
+        for (line, veh), traj in self.by_train.items():
+            n, j = len(traj), 0
+            for i, (t1, s1, direction) in enumerate(traj):
+                j = max(j, i + 1)
+                while j < n and traj[j][1] == s1:
+                    j += 1  # (seen again at the same station: still there)
+                leave = t1
+                if j < n:
+                    r = run.get((line, s1, traj[j][1]), run.get((line, traj[j][1], s1)))
+                    if r is not None:
+                        est = traj[j][0] - timedelta(seconds=r)
+                        leave = max(t1, est) if est - t1 <= stand else t1
+                at_stop[(line, s1)].append((t1, veh, direction, leave))
+        self.at_stop = {k: sorted(v, key=order) for k, v in at_stop.items()}
+        self.times = {k: [x[0] for x in v] for k, v in self.at_stop.items()}
         # Silences: stretches longer than SILENT_MIN with no measured arrival anywhere (before the first and after
         # the last arrival of the data included)
         every.sort()
@@ -110,30 +194,52 @@ def _serves(line, a, b, last_stop, bound) -> bool | None:
 
 
 def ride(idx: Index, line: str, a: str, b: str, t: datetime, planned_min: float) -> Ride | None:
+    """The train you'd take from a to b, reaching a's platform at t: of the trains still there or yet to come,
+    the one that gets to b first. None: none within MAX_WAIT_MIN."""
     plats = idx.at_stop.get((line, a))
     if not plats:
         return None
     times = idx.times[(line, a)]
     max_ride = timedelta(minutes=planned_min * MAX_RIDE_FACTOR + MAX_RIDE_EXTRA_MIN)
-    let_go, gap = 0, False
-    for k in range(bisect.bisect_left(times, t - timedelta(seconds=BOARD_SLACK_S)), len(plats)):
-        ta, veh, direction = plats[k]
-        if ta - t > timedelta(minutes=MAX_WAIT_MIN):
-            return None
-        traj = idx.by_train[(line, veh)]
-        i = bisect.bisect_right(idx.train_times[(line, veh)], ta)
-        last = None
-        for tt, stop, _ in traj[i:]:
-            if tt - ta > max_ride or stop == a:
-                break  # too long, or back through your stop: it turned round
-            if stop == b:
-                gap = gap or idx.unknown_between(line, a, t - timedelta(seconds=BOARD_SLACK_S), ta)
-                return Ride(ta, tt, veh, let_go, gap)
+    slack = timedelta(seconds=BOARD_SLACK_S)
+    best: Ride | None = None
+    passed_over: list[tuple[datetime, bool]] = []  # trains not taken: when they were at a, and a tracking gap
+    for k in range(bisect.bisect_left(times, t - timedelta(minutes=MAX_STAND_MIN)), len(plats)):
+        ta, veh, direction, leave = plats[k]
+        if leave < t - slack:
+            continue  # it had left before you got there
+        if ta - t > timedelta(minutes=MAX_WAIT_MIN) or (best is not None and ta >= best.arrive):
+            break  # nothing later can get you there sooner
+        arrive, last = _follow(idx, line, veh, ta, a, b, max_ride)
+        if arrive is not None:
+            if best is None or arrive < best.arrive:
+                best = Ride(ta, arrive, veh, 0, False)
+        else:
+            passed_over.append((ta, bool(last and _serves(line, a, b, last, direction))))
+    if best is None:
+        return None
+    before = [g for when, g in passed_over if when < best.board]
+    gap = any(before) or idx.unknown_between(line, a, t - slack, best.board)
+    return Ride(best.board, best.arrive, best.vehicle, len(before), gap)
+
+
+def _follow(idx: Index, line: str, veh: str, ta: datetime, a: str, b: str,
+            max_ride: timedelta) -> tuple[datetime | None, str | None]:
+    """Where train `veh`, at a at ta, went next: (when it reached b, None), or (None, the last station it was
+    seen at before turning round or running out of time)."""
+    traj = idx.by_train[(line, veh)]
+    i = bisect.bisect_right(idx.train_times[(line, veh)], ta)
+    last, prev, passed = None, a, {a}
+    for tt, stop, _ in traj[i:]:
+        if tt - ta > max_ride or (stop in passed and stop != prev):
+            break  # too long, or back at a station it already passed (your stop included): it turned round
+        passed.add(stop)
+        prev = stop  # (seen twice in a row at one station is a train standing there, not turning round)
+        if stop == b:
+            return tt, None
+        if stop != a:
             last = stop
-        if last and _serves(line, a, b, last, direction):
-            gap = True  # seen beyond your stop going your way, without being seen at it
-        let_go += 1
-    return None
+    return None, last
 
 
 def journey_time(idx: Index, legs: list[dict], depart: datetime) -> dict | None:
@@ -148,7 +254,7 @@ def journey_time(idx: Index, legs: list[dict], depart: datetime) -> dict | None:
         if r is None:
             return None
         wait += max(0.0, (r.board - t).total_seconds() / 60)
-        riding += (r.arrive - r.board).total_seconds() / 60
+        riding += (r.arrive - max(r.board, t)).total_seconds() / 60  # (a train already standing there: from now)
         let_go += r.let_go
         gap = gap or r.gap
         t = max(t, r.arrive)

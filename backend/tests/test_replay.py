@@ -161,3 +161,63 @@ def test_the_summary_says_when_tracking_ran(monkeypatch):
     assert s["tracked"]["from"] == "08:00" and s["tracked"]["to"] == "17:59"
     assert s["tracked"]["silent_min_06_22"] == pytest.approx(120 + 241, abs=1)  # 06:00-08:00 and 17:59-22:00
     assert s["outages"] > 0 and s["usable"] > 0 and s["minutes_over_planned"]["p50"] == 0.0
+
+
+GPK, OXC, WRR, EUS = "940GZZLUGPK", "940GZZLUOXC", "940GZZLUWRR", "940GZZLUEUS"
+
+
+def test_stations_a_train_was_missed_at_are_filled_in_from_the_line_map():
+    # Trackernet never reports Oxford Circus on the Victoria line; trains are seen at Green Park, then Warren St
+    arr = train("victoria", "201", [(GPK, 0), (WRR, 4), (EUS, 6)], "northbound")
+    filled = replay.fill_missed(arr)
+    assert ("victoria", OXC, "201", "northbound", at(2)) in filled and len(filled) == 4
+    idx = Index(arr)
+    r = replay.journey_time(idx, [{"line_id": "victoria", "from": OXC, "to": EUS, "minutes": 4}], at(1))
+    assert r["minutes"] == 5.0 and r["gap"] is False  # boarded at Oxford Circus at 2, at Euston at 6
+    # not across a reversal or a long stop: Green Park to Warren Street in 20 minutes isn't a train passing through
+    slow = train("victoria", "202", [(GPK, 0), (WRR, 20)], "northbound")
+    assert len(replay.fill_missed(slow)) == 2
+
+
+def test_a_train_is_followed_only_until_it_turns_round(monkeypatch):
+    monkeypatch.setattr(replay, "_serves", lambda *a: False)
+    # 301 passes B without being seen there, turns round at the end of the line and comes back through B:
+    # that is not your train (its later arrival at B is on the way back)
+    arr = (train("district", "301", [(A, 1), (X, 9), (C, 15), (X, 21), (B, 25)])
+           + train("district", "302", [(A, 6), (B, 12)]))
+    r = replay.journey_time(Index(arr), [{"line_id": "district", "from": A, "to": B, "minutes": 6}], at(0))
+    assert r["minutes"] == 12.0 and r["let_go"] == 1
+
+
+def test_a_train_standing_at_the_end_of_the_line_can_be_boarded(monkeypatch):
+    monkeypatch.setattr(replay, "_serves", lambda *a: False)
+    arr = []
+    for k in range(5):  # trains coming in from B take 3 minutes to reach A, the end of the line
+        arr += train("bakerloo", f"9{k}", [(C, 10 * k - 6), (B, 10 * k - 3), (A, 10 * k)], "southbound")
+    # 401 came in at 30, stands until about 37 and goes back out; you get there at 33: you can still board it
+    arr += train("bakerloo", "401", [(C, 24), (B, 27), (A, 30), (B, 40), (C, 43)], "northbound")
+    arr += train("bakerloo", "402", [(A, 36), (B, 49)], "northbound")
+    r = replay.journey_time(Index(arr), [{"line_id": "bakerloo", "from": A, "to": B, "minutes": 3}], at(33))
+    assert r["minutes"] == 7.0 and r["wait"] == 0.0 and r["ride"] == 7.0  # sat on it until it left
+
+
+def test_you_take_whichever_train_gets_you_there_first(monkeypatch):
+    monkeypatch.setattr(replay, "_serves", lambda *a: False)
+    arr = []
+    for k in range(4):  # earlier trains: the usual running time from A to B is 3 minutes
+        arr += train("hammersmith-city", f"8{k}", [(C, 10 * k - 5), (A, 10 * k - 3), (B, 10 * k)])
+    # at the end of the line: 501 came in first but stands for 20 minutes; 502 came in later and leaves at once
+    arr += train("hammersmith-city", "501", [(A, 30), (B, 53)])
+    arr += train("hammersmith-city", "502", [(A, 38), (B, 41)])
+    r = replay.journey_time(Index(arr), [{"line_id": "hammersmith-city", "from": A, "to": B, "minutes": 3}], at(31))
+    assert r["minutes"] == 10.0  # on 502, at B at 41 (501 would have been 53)
+
+
+def test_a_train_taken_out_of_service_is_not_boardable_for_hours(monkeypatch):
+    monkeypatch.setattr(replay, "_serves", lambda *a: False)
+    arr = []
+    for k in range(6):
+        arr += train("central", f"7{k}", [(C, 10 * k - 2), (A, 10 * k), (B, 10 * k + 3)])
+    arr += train("central", "601", [(A, 5), (B, 200)])  # into the sidings at A, out again hours later
+    r = replay.journey_time(Index(arr), [{"line_id": "central", "from": A, "to": B, "minutes": 3}], at(44))
+    assert r["minutes"] == 9.0  # the 50 train, not 601 "standing" at A
