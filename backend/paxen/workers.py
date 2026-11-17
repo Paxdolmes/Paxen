@@ -36,6 +36,20 @@ def recorder_tick() -> dict:
     provider = get_provider()
     with SessionLocal() as s:
         extra = PILOT_STOPS_SIM if isinstance(provider, SimProvider) else []
+        from . import recorder
+
+        if not recorder.recording_allowed(s, utcnow()):
+            # Disk nearly full (PAXEN_DB_PAUSE_MB). Line statuses are tiny and alerts need them; train data still
+            # goes to the raw archive, so nothing is lost and these hours can be rebuilt; only the database copy
+            # is skipped.
+            now = utcnow()
+            recorder.record_statuses(s, provider, now)
+            out = {"paused": recorder.PAUSED,
+                   "archived": [recorder.archive_network(s, provider, m, now) for m in settings.record_modes or []]}
+            if _TRACKERNET is not None and settings.provider == "tfl":
+                out["trackernet"] = recorder.record_trackernet(s, _TRACKERNET, now, store=False)
+            s.commit()
+            return out
         out = record_once(s, provider, utcnow(), extra, modes=settings.record_modes)
         if _TRACKERNET is not None and settings.provider == "tfl":
             from .recorder import record_trackernet

@@ -63,7 +63,8 @@ PAXEN_RUN_WORKERS=0
    TFL_APP_KEY=<your TfL "paxen" primary key>
    PAXEN_POLL_INTERVAL=30
    PAXEN_RECORD_MODES=tube,overground,elizabeth-line,tram
-   PAXEN_PREDICTION_RETENTION_DAYS=14
+   PAXEN_PREDICTION_RETENTION_DAYS=0   # keep every day (0); a number deletes days older than that
+   PAXEN_DB_PAUSE_MB=4200              # disk safety switch: see Costs; raise it with a bigger volume
    PAXEN_ARCHIVE_URL=s3://paxen-raw/london
    AWS_ACCESS_KEY_ID=<R2 Access Key ID>
    AWS_SECRET_ACCESS_KEY=<R2 Secret Access Key>
@@ -148,6 +149,11 @@ Measured on live data (3 Nov 2026):
   (`PAXEN_PREDICTION_RETENTION_DAYS`, default 60): 60 days ~10 GB, 30 days ~6 GB, 14 days ~4 GB. `/v1/health` shows the
   live size (`data.db_mb`). Railway's Hobby plan caps a volume at 5 GB; Pro starts at 50 GB. Postgres reuses the space
   of deleted rows but doesn't hand it back to the disk, so the on-disk size never shrinks by itself.
+- **Disk safety switch** (`PAXEN_DB_PAUSE_MB`, default 4200 for the 5 GB Hobby volume; 0 turns it off). A full disk
+  stops every write and can stop Postgres, so over this size the worker stops saving train data to the database
+  and keeps everything else running. The raw responses still go to the R2 archive, so those hours can be rebuilt.
+  `/v1/health` shows `data.push.worker.recording_paused` and whether archive writes are succeeding
+  (`data.push.worker.archive`). With a bigger volume, set it about 0.8 GB under the volume size.
 - **Railway compute** (Hobby: $5/month covers the first $5 of usage). The database is the biggest user. To keep it
   small: training runs once a day (`PAXEN_TRAIN_INTERVAL`, seconds, default 86400), storage thinning every 2 hours
   (`PAXEN_THIN_INTERVAL`, default 7200), and Darwin matches trains from the recorder's memory rather than the database.

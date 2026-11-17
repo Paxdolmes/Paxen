@@ -23,7 +23,7 @@ from .timeutil import aware, naive_utc
 
 log = logging.getLogger("paxen.recorder")
 
-KEEP_OPS_DAYS = 7  # raw_snapshots rows and line_status_snapshots (see prune)
+KEEP_OPS_DAYS = 2  # raw_snapshots rows and line_status_snapshots (see prune): read back 20 minutes and 24 hours
 KEEP_RAW_PAYLOAD_DAYS = 2  # database copies of raw responses; the archive (R2) keeps the originals
 ARRIVAL_COUNTDOWN_MAX_S = 120  # last sighting must be this close to arrival to infer an arrival
 WATCH_TTL = timedelta(days=7)
@@ -333,7 +333,7 @@ _AT_PLATFORM: dict[tuple, datetime] = {}  # (station, line code, set number, pla
 
 
 def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archive=None,
-                      present: dict | None = None) -> dict:
+                      present: dict | None = None, store: bool = True) -> dict:
     """Measured Tube arrivals: every train first seen 'At Platform', timed by the signalling system.
 
     A train waiting at a terminus stays 'At Platform' for many minutes and its timestamp can change while it sits
@@ -365,6 +365,8 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
             failed.append(code)
             log.warning("trackernet %s failed: %s", code,redact(e))
             continue
+        if not store:  # disk nearly full: only the raw response goes to the archive
+            continue
         for t in trains:
             naptan = stations.get(t.station_code)
             if not naptan:
@@ -395,6 +397,60 @@ def record_trackernet(s: Session, tn, now: datetime, source: str = "tfl", archiv
         archive_raw(source, "trackernet", now, json.dumps(raws), archive)
     s.commit()
     return {"measured_arrivals": created, "unmapped": unmapped, "failed_lines": failed}
+
+
+# ------------------------------------------------------------------ disk safety switch
+# The database lives on a fixed-size disk. A full disk stops every write (trips, alerts, sign-ups) and can stop
+# Postgres outright, so above PAXEN_DB_PAUSE_MB the worker stops recording train data, which is what fills it,
+# and carries on with everything else. Recording resumes once the database is back under the limit.
+DB_SIZE_CHECK_S = 300
+# Railway's Hobby volume is 5 GB. The database files at 4.2 GB put the disk at about 4.6 GB, and training and the
+# nightly clean-up add up to 0.3 GB for a while: about the most that is safe. Raise it once the disk is bigger.
+DEFAULT_PAUSE_MB = 4200
+RESUME_BELOW_MB = 100  # resume only this far under the limit, so it doesn't flap on and off
+_db_size: tuple[datetime, int] | None = None
+PAUSED: dict | None = None  # {"since", "db_mb", "limit_mb"} while recording is paused
+
+
+def db_size_mb(s: Session, now: datetime) -> int | None:
+    """The database's size, read at most every 5 minutes. None where it can't be measured (SQLite)."""
+    global _db_size
+    if _db_size and (now - _db_size[0]).total_seconds() < DB_SIZE_CHECK_S:
+        return _db_size[1]
+    if s.get_bind().dialect.name != "postgresql":
+        return None
+    mb = int(s.scalar(text("SELECT pg_database_size(current_database())")) / 1e6)
+    _db_size = (now, mb)
+    return mb
+
+
+def recording_allowed(s: Session, now: datetime) -> bool:
+    """False while the database is over PAXEN_DB_PAUSE_MB (default DEFAULT_PAUSE_MB; 0: no limit). Postgres keeps
+    the space of deleted rows for reuse rather than giving it back, so once paused this usually stays paused
+    until the limit is raised or old days are moved out (history.py)."""
+    import os
+
+    global PAUSED
+    limit = int(os.getenv("PAXEN_DB_PAUSE_MB", str(DEFAULT_PAUSE_MB)) or 0)
+    if limit <= 0:
+        PAUSED = None
+        return True
+    try:
+        mb = db_size_mb(s, now)
+    except Exception:
+        log.exception("couldn't measure the database size")
+        return PAUSED is None
+    if mb is None:
+        return True
+    if PAUSED is None and mb >= limit:
+        PAUSED = {"since": aware(now).isoformat(), "db_mb": mb, "limit_mb": limit}
+        log.error("database at %s MB, over PAXEN_DB_PAUSE_MB=%s: recording train data is paused", mb, limit)
+    elif PAUSED is not None and mb < limit - RESUME_BELOW_MB:
+        log.warning("database at %s MB, under PAXEN_DB_PAUSE_MB=%s again: recording resumes", mb, limit)
+        PAUSED = None
+    elif PAUSED is not None:
+        PAUSED = {**PAUSED, "db_mb": mb, "limit_mb": limit}
+    return PAUSED is None
 
 
 def record_once(s: Session, provider: Provider, now: datetime, extra_stops: list[str] | None = None,

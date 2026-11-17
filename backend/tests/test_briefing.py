@@ -139,7 +139,11 @@ def test_the_worker_reports_whether_it_can_send_iphone_pushes(client, monkeypatc
         notify.note_worker(s, MORNING)
     recorder._DATA_STATS.clear()
     worker = c.get("/v1/health").json()["data"]["push"]["worker"]
-    assert worker == {"apns_configured": False, "seen_at": MORNING.isoformat(), "prediction_retention_days": 60}
+    assert {k: worker[k] for k in ("apns_configured", "seen_at", "prediction_retention_days")} == {
+        "apns_configured": False, "seen_at": MORNING.isoformat(), "prediction_retention_days": 60}
+    # whether the raw archive is set up and working, and the disk safety switch
+    assert worker["archive"]["configured"] is False and worker["archive"]["last_error"] is None
+    assert worker["db_pause_mb"] == recorder.DEFAULT_PAUSE_MB and worker["recording_paused"] is None
 
 
 def test_not_commuting_today_silences_today_only(client):

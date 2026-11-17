@@ -76,6 +76,8 @@ def get_archive():
 
 
 _warned: set[str] = set()
+# What this process last saw, for /v1/health (via the worker's status note): proof that writes are succeeding.
+status: dict = {"last_ok_at": None, "last_error": None, "last_error_at": None, "writes": 0, "failures": 0}
 
 
 def _warn_once(msg: str) -> None:
@@ -96,7 +98,11 @@ def archive_raw(source: str, name: str, when: datetime, raw: str | bytes, archiv
         return None
     try:
         data = raw if isinstance(raw, bytes) else raw.encode()
-        return archive.put(object_key(source, name, when), gzip.compress(data, compresslevel=6))
+        key = archive.put(object_key(source, name, when), gzip.compress(data, compresslevel=6))
+        status.update(last_ok_at=aware(when).isoformat(), writes=status["writes"] + 1)
+        return key
     except Exception as e:
         log.warning("archive write failed (%s): %s", name, e)
+        status.update(last_error=type(e).__name__, last_error_at=aware(when).isoformat(),
+                      failures=status["failures"] + 1)
         return None
