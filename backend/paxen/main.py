@@ -882,6 +882,30 @@ def journeys_report(u: User = Depends(current_user), s: Session = Depends(db)):
             "store": store, "pipeline": json.loads(prog.value) if prog else None}
 
 
+HISTORY_DOWNLOADS = ("journey_times", "observed_arrivals")
+
+
+@app.get("/v1/journeys/history/{table}/{day}")
+def journeys_history_file(table: str, day: str, u: User = Depends(current_user), s: Session = Depends(db)):
+    """One day of the history store as Parquet: the replayed journey times, or the measured Tube arrivals they
+    were replayed from. Network data from TfL's feeds only, nothing about any user; for checking the replay and
+    the journey model offline."""
+    from .archive import get_archive
+    from .db import ExportedDay
+
+    if table not in HISTORY_DOWNLOADS:
+        raise HTTPException(404, f"Only {', '.join(HISTORY_DOWNLOADS)}")
+    rec = s.scalars(select(ExportedDay).where(ExportedDay.source == get_provider().name, ExportedDay.table == table,
+                                              ExportedDay.day == day)).first()
+    if rec is None or not rec.key:
+        raise HTTPException(404, "That day isn't in the history store")
+    archive = get_archive()
+    if archive is None:
+        raise HTTPException(503, "The history store isn't configured on this service (PAXEN_ARCHIVE_URL)")
+    return Response(archive.get_bytes(rec.key), media_type="application/vnd.apache.parquet",
+                    headers={"Content-Disposition": f'attachment; filename="{table}-{day}.parquet"'})
+
+
 @app.get("/v1/insights")
 def get_insights(u: User = Depends(current_user), s: Session = Depends(db)):
     return build_insights(s, u.id, now(), get_provider().name)

@@ -116,3 +116,34 @@ def test_the_report_shows_the_store_and_the_run():
     oa = rep["store"]["observed_arrivals"]
     assert oa["days"] >= 2 and oa["partial"] >= 1 and oa["rows"] >= 20 and oa["mb"] >= 4.0
     assert rep["pipeline"]["run"]["step"] == "rebuild 2001-01-01"
+
+
+def test_a_day_of_the_history_store_can_be_downloaded(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    import paxen.main as main
+    from paxen.db import SessionLocal
+
+    monkeypatch.setenv("PAXEN_ARCHIVE_URL", f"file://{tmp_path}/store")
+    arch.get_archive.cache_clear()
+    key = "history/sim/journey_times/2001-01-03.parquet"
+    arch.get_archive().put_bytes(key, b"PAR1 test PAR1")
+    try:
+        with TestClient(main.app) as c:
+            with SessionLocal() as s:
+                s.add(ExportedDay(source="sim", table="journey_times", day="2001-01-03", key=key, rows=1, bytes=14))
+                s.commit()
+            try:
+                c.headers["Authorization"] = "Bearer " + c.post("/v1/users").json()["token"]
+                r = c.get("/v1/journeys/history/journey_times/2001-01-03")
+                assert r.status_code == 200 and r.content == b"PAR1 test PAR1"
+                assert r.headers["content-type"] == "application/vnd.apache.parquet"
+                assert c.get("/v1/journeys/history/journey_times/2001-01-04").status_code == 404
+                assert c.get("/v1/journeys/history/predictions/2001-01-03").status_code == 404  # network data only
+                c.delete("/v1/me")
+            finally:
+                with SessionLocal() as s:
+                    s.query(ExportedDay).filter(ExportedDay.day == "2001-01-03").delete()
+                    s.commit()
+    finally:
+        arch.get_archive.cache_clear()

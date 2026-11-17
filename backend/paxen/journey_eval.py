@@ -13,7 +13,7 @@ import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from .timeutil import LONDON, naive_utc
+from .timeutil import LONDON
 
 log = logging.getLogger("paxen.journey_eval")
 
@@ -444,7 +444,7 @@ def run(s, source: str, archive) -> dict:
     from sqlalchemy import select
 
     from .db import AppSecret, ExportedDay
-    from .replay import load_panel
+    from .replay import VERSION, load_panel
 
     panel = load_panel()
     days = [d for (d,) in s.execute(select(ExportedDay.day).where(
@@ -452,6 +452,8 @@ def run(s, source: str, archive) -> dict:
         .order_by(ExportedDay.day))]
     row = s.get(AppSecret, REPORT)
     prev = json.loads(row.value) if row else {}
+    if prev.get("replay_version") != VERSION:
+        prev = {}  # the ground truth was replayed under new rules: every test day is scored again
     if len(days) <= MIN_TRAIN_DAYS or not panel or archive is None:
         rep = {"status": "collecting", "days": days,
                "message": f"{len(days)} replayed days; testing starts after {MIN_TRAIN_DAYS}."}
@@ -462,6 +464,7 @@ def run(s, source: str, archive) -> dict:
         rep = evaluate(loaded, load_context(s, lo, hi), panel, done=prev.get("per_day"))
         rep["status"] = rep["decision"]["status"]
     rep["evaluated_at"] = datetime.now(timezone.utc).isoformat()
+    rep["replay_version"] = VERSION
     value = json.dumps(rep)
     if row:
         row.value = value
