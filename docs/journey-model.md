@@ -116,3 +116,54 @@ suspension on one line doesn't silence the network, so real delays stay in the g
 
 **Re-run.** The replay rules have a version number (`replay.VERSION`, now 2). Every day replayed under an older
 version is replayed again, and the evaluation scores every test day again from scratch.
+
+## Amendment 2 (17 November 2026): following trains properly
+
+**What had been seen.**
+- The per-line summaries of four days replayed under Amendment 1 (4, 5, 6 and 16 November). Departures on the
+  Central, Piccadilly and Circle lines ran a p90 of 42–49 minutes over planned on every day, including days with
+  no tracking outage.
+- The measured arrivals of 16 November, downloaded and replayed offline.
+- A trace of the slowest departures on 16 November, train by train.
+
+No evaluation had run and no candidate had been scored.
+
+**What was wrong.** Three faults in the replay, not in the trains:
+
+1. **Trains missed at a station.** Trackernet misses a train at about one station in eight. It misses some
+   platforms altogether: Oxford Circus on the Victoria line is never reported, so 42 panel journeys couldn't be
+   measured. A train that passed your stop without being seen there was followed to the end of the line and
+   back. Its arrival at your stop on the way back counted as your journey: Ealing Broadway to Bank came out at
+   144 minutes against 33 planned.
+2. **Trains standing at the end of the line.** A train standing there for several minutes could only be
+   boarded by someone who reached the platform before it arrived. Journeys from the ends of lines (Elephant &
+   Castle, Barking, Harrow & Wealdstone) waited for the next train instead.
+3. **The first train in isn't the first out.** At the end of a line, the first train to arrive isn't always the
+   first to leave.
+
+**The rules now.**
+- **Missed stations are filled in.** Where a train was seen at two stations a few stops apart, it passed the
+  stations between them on NUMBAT's map of the line. They are filled in at times spaced evenly between the two
+  sightings. This applies only along one direction of travel, to at most 3 missed stations, and only if it took
+  no more than 4 minutes per link.
+- **A train is followed only until it turns round.** It is followed until it reaches a station it already passed
+  on this ride. An arrival at your stop after that is on its way back.
+- **A standing train can be boarded.** You can board a train while it is still at the platform. When it leaves
+  is estimated from where it was seen next, less the usual running time there (the median of trains passing
+  through). A train that seems to stand for more than 30 minutes was out of service.
+- **The rider is informed.** Of the trains you could board, you take the one that gets you there first.
+
+**Effect on 16 November** (all 400 panel journeys now measured, 95% of departures usable):
+
+| | Before | After |
+|---|---|---|
+| Real minus planned, p50 | +4.6 min | +2.9 min |
+| Real minus planned, p90 | +24.8 min | +11.2 min |
+| Victoria line only, p50 / p90 | | +0.4 / +2.4 min |
+| Jubilee line only, p50 / p90 | | +1.2 / +4.5 min |
+
+Bakerloo rides remain about 3 minutes over the planner's times. That is consistent across stations, so it looks
+like the planner being optimistic, not a replay fault. The models learn "usual" from replayed journeys, not from
+planned times.
+
+**Re-run.** `replay.VERSION` is now 3. Every day is replayed again, and the evaluation starts from scratch.
