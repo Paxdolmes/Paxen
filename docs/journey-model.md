@@ -167,3 +167,49 @@ like the planner being optimistic, not a replay fault. The models learn "usual" 
 planned times.
 
 **Re-run.** `replay.VERSION` is now 3. Every day is replayed again, and the evaluation starts from scratch.
+
+## Amendment 3 (17 November 2026, about 17:30 UTC): two more candidates, scored only on new days
+
+**What had been seen.**
+- The registered protocol's results on its first 4 test days (11, 12, 13 and 16 November).
+- An offline check of 16 November, described under "Why" below.
+
+| h = 30, mean over the 4 test days | MAE | F1, slow |
+|---|---|---|
+| rules | 4.54 | 0.21 |
+| usual | 3.25 | 0.00 |
+| persistence | 4.33 | 0.07 |
+| journey_gbm | 3.21 | 0.04 (coverage 0.79) |
+
+**Why.**
+- **Most of the error is luck.** On 16 November, an "oracle" that knew how the same journey ran within 15
+  minutes either side that same day still had an MAE of 2.62 minutes. Against that, usual scored 2.75 and
+  journey_gbm 2.67. The waits at the first platform average 3.4 minutes. On an ordinary day, the error is almost
+  all the luck of when trains come, which nothing known 30 minutes ahead can predict.
+- **The two signals are split between candidates.** "usual" has the best typical time (27% better than the
+  rules). Only the rules react to disruptions, which is what decides "leave 10 minutes earlier" (F1 0.21 against
+  0 for usual).
+- **"Slow" is mostly noise.** A single departure 5 minutes over usual is mostly luck. The question a commuter has
+  is whether the journey is slow around that time.
+
+**Added.** The registered protocol above continues unchanged.
+
+1. **usual_status**: usual, plus the minutes the rules add for the line statuses at the issue time. That is the
+   rules' forecast with those statuses, less the same forecast with every line on good service; on good service
+   it is just usual.
+2. **journey_gbm_status**: journey_gbm with those status minutes as one more input.
+3. A metric for all candidates: **slow around this time**. The mean real minutes of the journey's departures
+   within 15 minutes either side is at least 5 over usual. Its precision, recall and F1 are reported as `*_sys`.
+
+**Test days.** Only test days from **17 November 2026** count. None of those days had been replayed or scored
+when this was written.
+
+**Decision.** usual_status or journey_gbm_status replaces the rules if, over at least 7 such test days, all of
+these hold:
+- its MAE beats the rules' by at least 5% at h = 30 and at h = 60;
+- it beats the rules on at least two-thirds of the days at both horizons;
+- its F1 for slow around this time at h = 30 is no lower than the rules';
+- for journey_gbm_status, its p10–p90 coverage is within 70–90%.
+
+If both qualify, the one with the lower MAE at h = 30 is chosen. The report shows this as `amendment3`, next to
+the registered `decision`.
