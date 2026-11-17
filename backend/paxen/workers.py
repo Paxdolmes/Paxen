@@ -189,7 +189,32 @@ def thin_tick() -> dict:
         out["arrivals"] = trim_arrivals(s, source)
         if exported is not None:
             out["dropped"] = drop_exported(s, source, utcnow())
+            try:
+                from .history import rebuild_pending
+                from .trackernet import from_env
+
+                # days thinned before the store existed: every measured Tube arrival, rebuilt from the raw archive
+                out["rebuilt"] = rebuild_pending(s, source, archive, from_env(), max_days=2)
+            except Exception:
+                log.exception("rebuilding arrivals from the archive failed")
+                s.rollback()
+            try:
+                from .replay import replay_pending
+
+                out["replay"] = replay_pending(s, source, archive)  # real journey times for the journey model
+            except Exception:
+                log.exception("journey replay failed")
+                s.rollback()
         return out
+
+
+def journeys_tick() -> dict:
+    """The journey model's pre-registered evaluation on the replayed days (paxen/journey_eval.py)."""
+    from .archive import get_archive
+    from .journey_eval import run
+
+    with SessionLocal() as s:
+        return run(s, get_provider().name, get_archive())
 
 
 TRAIN_FIRST_DELAY_S = 600  # let the recorder run for a while after a (re)start before the first training run
@@ -247,6 +272,9 @@ def start(loop_tasks: list) -> None:
                                                     first_delay=60)))
     delay = 0 if settings.provider == "sim" else TRAIN_FIRST_DELAY_S
     loop_tasks.append(asyncio.create_task(_loop(train_isolated, settings.train_interval_s, "train", first_delay=delay)))
+    if settings.provider != "sim":  # the journey model's evaluation, daily, an hour after training
+        loop_tasks.append(asyncio.create_task(_loop(lambda: train_isolated("--journeys-once"), settings.train_interval_s,
+                                                    "journeys", first_delay=TRAIN_FIRST_DELAY_S + 3600)))
     if settings.provider != "sim" and settings.thin_interval_s > 0:
         loop_tasks.append(asyncio.create_task(_loop(lambda: train_isolated("--thin-once"), settings.thin_interval_s,
                                                     "thin", first_delay=300)))

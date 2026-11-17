@@ -51,6 +51,12 @@ class LocalArchive:
     def get_bytes(self, key: str) -> bytes:
         return (self.root / key).read_bytes()
 
+    def list_keys(self, prefix: str) -> list[str]:
+        base = self.root / prefix
+        if not base.exists():
+            return []
+        return sorted(str(p.relative_to(self.root)) for p in base.rglob("*") if p.is_file())
+
 
 class S3Archive:
     def __init__(self, bucket: str, prefix: str, client=None):
@@ -76,6 +82,18 @@ class S3Archive:
     def get_bytes(self, key: str) -> bytes:
         full = f"{self.prefix}/{key}" if self.prefix else key
         return self.client.get_object(Bucket=self.bucket, Key=full)["Body"].read()
+
+    def list_keys(self, prefix: str) -> list[str]:
+        """Every key under prefix (relative to this archive's prefix), sorted."""
+        full = f"{self.prefix}/{prefix}" if self.prefix else prefix
+        keys, token = [], None
+        while True:
+            kw = {"Bucket": self.bucket, "Prefix": full, **({"ContinuationToken": token} if token else {})}
+            page = self.client.list_objects_v2(**kw)
+            keys += [o["Key"][len(self.prefix) + 1:] if self.prefix else o["Key"] for o in page.get("Contents", [])]
+            if not page.get("IsTruncated"):
+                return sorted(keys)
+            token = page.get("NextContinuationToken")
 
 
 @lru_cache(maxsize=1)
