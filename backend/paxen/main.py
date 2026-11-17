@@ -893,17 +893,29 @@ def journeys_history_file(table: str, day: str, u: User = Depends(current_user),
     from .archive import get_archive
     from .db import ExportedDay
 
-    if table not in HISTORY_DOWNLOADS:
-        raise HTTPException(404, f"Only {', '.join(HISTORY_DOWNLOADS)}")
+    import re
+
+    if table not in HISTORY_DOWNLOADS or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(404, f"Only {', '.join(HISTORY_DOWNLOADS)}, by day (YYYY-MM-DD)")
+    headers = {"Content-Disposition": f'attachment; filename="{table}-{day}.parquet"'}
+    archive = get_archive()
+    if archive is None:
+        # This service may not have the store's settings (only the worker needs them); measured arrivals are
+        # also in the database, so they come from there.
+        if table != "observed_arrivals":
+            raise HTTPException(503, "The history store isn't configured on this service (PAXEN_ARCHIVE_URL)")
+        from .db import ObservedArrival
+        from .history import export_table
+
+        data, rows = export_table(s, ObservedArrival, ObservedArrival.arrived_at, get_provider().name, day)
+        if not rows:
+            raise HTTPException(404, "No measured arrivals that day")
+        return Response(data, media_type="application/vnd.apache.parquet", headers=headers)
     rec = s.scalars(select(ExportedDay).where(ExportedDay.source == get_provider().name, ExportedDay.table == table,
                                               ExportedDay.day == day)).first()
     if rec is None or not rec.key:
         raise HTTPException(404, "That day isn't in the history store")
-    archive = get_archive()
-    if archive is None:
-        raise HTTPException(503, "The history store isn't configured on this service (PAXEN_ARCHIVE_URL)")
-    return Response(archive.get_bytes(rec.key), media_type="application/vnd.apache.parquet",
-                    headers={"Content-Disposition": f'attachment; filename="{table}-{day}.parquet"'})
+    return Response(archive.get_bytes(rec.key), media_type="application/vnd.apache.parquet", headers=headers)
 
 
 @app.get("/v1/insights")
