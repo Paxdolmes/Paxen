@@ -119,3 +119,49 @@ def test_the_daily_run_reads_the_store_and_keeps_its_report(session, tmp_path, m
     assert out["test_days"] == ["2026-11-09", "2026-11-10"] and out["decision"] == "waiting"
     rep = json.loads(session.get(AppSecret, je.REPORT).value)
     assert rep["decision"]["summary"]["30"]["usual"]["mae"] is not None
+
+
+def test_amendment3_scores_only_new_days_and_uses_the_status_minutes():
+    """Usual plus the minutes the rules add for a disruption, the model with that as an input, and "slow around
+    this time"; only on test days from AMEND3_FROM."""
+    days, runs = [], []
+    for i in range(12):  # 8-19 November; the District is severely delayed from 15:00 every other day
+        day = f"2026-11-{8 + i:02d}"
+        slow = i % 2 == 0
+        days.append(make_day(day, slow_from=15 * 60 if slow else None, slow_by=10.0, seed=i))
+        if slow:
+            d = datetime.strptime(day, "%Y-%m-%d")
+            runs.append((d + timedelta(hours=14, minutes=45), d + timedelta(hours=22), "severe",
+                         {"description": "Severe delays"}))
+    c = je.Context({"district": runs}, {})
+    out = je.evaluate(days, c, PANEL)
+    old, new = out["per_day"]["2026-11-16"]["30"], out["per_day"]["2026-11-17"]["30"]
+    assert "usual_status" not in old  # before the amendment: the registered candidates only
+    assert {"usual_status", "journey_gbm_status"} <= set(new) and "f1_sys" in new["rules"]
+    a3 = out["amendment3"]
+    assert a3["status"] == "waiting" and a3["test_days"] == ["2026-11-17", "2026-11-18", "2026-11-19"]
+    s = a3["summary"]["30"]
+    # on a disrupted afternoon the rules add minutes that usual alone doesn't have
+    slow_day = out["per_day"]["2026-11-18"]["30"]
+    assert slow_day["usual_status"]["mae"] < slow_day["usual"]["mae"]
+    assert s["usual_status"]["f1_sys"] > s["usual"]["f1_sys"]
+    assert s["journey_gbm_status"]["coverage"] is not None
+
+
+def test_amendment3_decision_rule():
+    def day(us, gs, rules=5.0, f1=0.4, rules_f1=0.3, cov=0.8):
+        base = {"mae": rules, "f1": 0.3, "f1_sys": rules_f1}
+        return {h: {"rules": dict(base), "usual": {"mae": 3.3, "f1": 0.0, "f1_sys": 0.0},
+                    "persistence": {"mae": 4.3, "f1": 0.1, "f1_sys": 0.1},
+                    "journey_gbm": {"mae": 3.2, "f1": 0.05, "f1_sys": 0.05, "coverage": cov},
+                    "usual_status": {"mae": us, "f1": f1, "f1_sys": f1},
+                    "journey_gbm_status": {"mae": gs, "f1": f1, "f1_sys": f1, "coverage": cov}}
+                for h in ("60", "30", "10")}
+
+    week = [f"2026-11-{17 + i}" for i in range(7)]
+    assert je.decide_amendment3({d: day(3.3, 3.1) for d in week})["winner"] == "journey_gbm_status"
+    assert je.decide_amendment3({d: day(3.3, 3.1, cov=0.6) for d in week})["winner"] == "usual_status"
+    # spotting slow journeys worse than the rules: no change, however good the average
+    assert je.decide_amendment3({d: day(3.3, 3.1, f1=0.2) for d in week})["status"] == "no_change"
+    # days before the amendment don't count
+    assert je.decide_amendment3({f"2026-11-{10 + i}": day(3.3, 3.1) for i in range(7)})["status"] == "waiting"

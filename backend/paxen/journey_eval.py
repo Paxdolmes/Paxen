@@ -29,6 +29,11 @@ SLOW_MIN = 5.0
 PEAKS = ((7 * 60, 10 * 60), (16 * 60 + 30, 19 * 60 + 30))
 NETWORK_WINDOW_MIN = 30
 MAX_TRAIN_ROWS = 300_000
+# Amendment 3 (docs/journey-model.md): two more candidates and "slow around this time", scored only on test days
+# from this one (none of which had been seen when it was registered)
+AMEND3_FROM = "2026-11-17"
+SYS_WINDOW_MIN = 15  # "slow around this time": the mean of this journey's departures within 15 minutes either side
+GOOD = ("good", 0.0, None)
 CATS = {"good": 0, "minor": 1, "severe": 2, "part_suspended": 3, "suspended": 4}
 # England bank holidays (gov.uk)
 BANK_HOLIDAYS = {date(2026, 1, 1), date(2026, 4, 3), date(2026, 4, 6), date(2026, 5, 4), date(2026, 5, 25),
@@ -203,10 +208,12 @@ class DayRows:
     """Every scored (journey, departure, horizon) of one day, as arrays: features (only from before the issue
     time), the real minutes, usual and persistence."""
 
-    def __init__(self, day: str, journeys: list[str], minute, horizon, y, usual, persistence, X, issue):
+    def __init__(self, day: str, journeys: list[str], minute, horizon, y, usual, persistence, X, issue, ysys=None):
         self.day, self.journeys = day, journeys
         self.minute, self.horizon, self.y, self.usual, self.persistence, self.X, self.issue = (
             minute, horizon, y, usual, persistence, X, issue)
+        self.ysys = ysys  # Amendment 3: the mean real minutes of this journey around this time (see SYS_WINDOW_MIN)
+        self.delta = None  # Amendment 3: the minutes the rules add for the line statuses at issue (status_delta)
 
     def __len__(self):
         return len(self.y)
@@ -218,7 +225,7 @@ def rows_for_day(day: Day, usual: Usual, ctx: Context, panel: dict[str, dict], l
 
     net = NetworkState(day, usual, panel)
     weekend = 1.0 if daytype(day.day) == "weekend" else 0.0
-    js, mins, hs, ys, us, ps, xs, issues = [], [], [], [], [], [], [], []
+    js, mins, hs, ys, us, ps, xs, issues, sys_ = [], [], [], [], [], [], [], [], []
     nan = math.nan
     for jid, rec in day.by_journey.items():
         j = panel.get(jid)
@@ -227,10 +234,14 @@ def rows_for_day(day: Day, usual: Usual, ctx: Context, panel: dict[str, dict], l
         lines = journey_lines(j)
         planned = day.planned[jid]
         first = float(lines_index.get(lines[0], len(lines_index)))
+        order = sorted(range(len(rec["dep"])), key=lambda i: rec["dep"][i])
+        deps, yv = [rec["dep"][i] for i in order], [rec["y"][i] for i in order]
         for m, y, dep_utc in zip(rec["dep"], rec["y"], rec["dep_utc"]):
             if m % step:
                 continue
             u = usual.get(jid, day.day, m, planned)
+            around = yv[bisect.bisect_left(deps, m - SYS_WINDOW_MIN):bisect.bisect_right(deps, m + SYS_WINDOW_MIN)]
+            ysys = sum(around) / len(around)
             for h in HORIZONS:
                 issue = dep_utc - timedelta(minutes=h)
                 devs = finished_deviations(day, usual, jid, issue, planned)
@@ -255,8 +266,10 @@ def rows_for_day(day: Day, usual: Usual, ctx: Context, panel: dict[str, dict], l
                 us.append(u)
                 ps.append(u + (devs[0][0] if devs else 0.0))
                 issues.append(issue)
+                sys_.append(ysys)
     return DayRows(day.day, js, np.array(mins), np.array(hs), np.array(ys, dtype=float), np.array(us, dtype=float),
-                   np.array(ps, dtype=float), np.array(xs, dtype=np.float32).reshape(-1, len(FEATURES)), issues)
+                   np.array(ps, dtype=float), np.array(xs, dtype=np.float32).reshape(-1, len(FEATURES)), issues,
+                   np.array(sys_, dtype=float))
 
 
 # ------------------------------------------------------------------ the rules (what the app does today)
@@ -308,20 +321,45 @@ def rules_prediction(j: dict, dep_utc: datetime, issue: datetime, st: list[tuple
     return p50
 
 
+def status_delta(rows: DayRows, ctx: Context, pmap: dict, cache: dict):
+    """Amendment 3: for each row, the minutes the rules add for the line statuses at the issue time (the rules'
+    forecast with those statuses, less the same forecast with every line on good service). 0 on good service."""
+    import numpy as np
+
+    delta = np.zeros(len(rows))
+    for k in range(len(rows)):
+        j = pmap[rows.journeys[k]]
+        lines = journey_lines(j)
+        st = [ctx.status(line, rows.issue[k]) for line in lines]
+        if all(c == "good" for c, _, _ in st):
+            continue
+        dep = rows.issue[k] + timedelta(minutes=int(rows.horizon[k]))
+        delta[k] = (rules_prediction(j, dep, rows.issue[k], st, lines, cache)
+                    - rules_prediction(j, dep, rows.issue[k], [GOOD] * len(lines), lines, cache))
+    return delta
+
+
 # ------------------------------------------------------------------ the model
-def fit_gbm(parts: list[DayRows], seed: int = 0) -> dict:
+def _X(p: DayRows, with_delta: bool):
+    import numpy as np
+
+    return np.column_stack([p.X, p.delta.astype(np.float32)]) if with_delta else p.X
+
+
+def fit_gbm(parts: list[DayRows], seed: int = 0, with_delta: bool = False) -> dict:
+    """journey_gbm; with_delta: Amendment 3's journey_gbm_status (the rules' status minutes as one more input)."""
     import numpy as np
     from sklearn.ensemble import HistGradientBoostingRegressor
 
-    X = np.concatenate([p.X for p in parts])
+    X = np.concatenate([_X(p, with_delta) for p in parts])
     yd = np.concatenate([p.y - p.usual for p in parts])
     if len(yd) > MAX_TRAIN_ROWS:
         keep = np.random.default_rng(seed).choice(len(yd), MAX_TRAIN_ROWS, replace=False)
         X, yd = X[keep], yd[keep]
     # a column with no values at all (e.g. no weather recorded yet) can't be binned: left out, here and when predicting
     cols = np.flatnonzero(~np.all(np.isnan(X), axis=0))
-    cat = [CATEGORICAL[c] for c in cols]
-    models: dict = {"cols": cols}
+    cat = [(CATEGORICAL + [False])[c] for c in cols]
+    models: dict = {"cols": cols, "with_delta": with_delta}
     for q in (0.1, 0.5, 0.9):
         m = HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=200, learning_rate=0.08,
                                           max_leaf_nodes=31, min_samples_leaf=50, categorical_features=cat,
@@ -332,7 +370,7 @@ def fit_gbm(parts: list[DayRows], seed: int = 0) -> dict:
 
 
 def predict_gbm(models: dict, rows: DayRows):
-    X = rows.X[:, models["cols"]]
+    X = _X(rows, models.get("with_delta", False))[:, models["cols"]]
     return {q: rows.usual + models[q].predict(X) for q in (0.1, 0.5, 0.9)}
 
 
@@ -354,6 +392,14 @@ def score(rows: DayRows, idx, pred, lo=None, hi=None) -> dict:
            "recall": round(rec, 3) if rec is not None else None, "f1": round(f1, 3) if f1 is not None else None}
     if lo is not None:
         out["coverage"] = round(float(((lo[idx] <= y) & (y <= hi[idx])).mean()), 3)
+    if rows.ysys is not None:  # Amendment 3: slow around this time (the journey's departures +-15 min)
+        sslow = (rows.ysys[idx] - u) >= SLOW_MIN
+        tp = int((sslow & said).sum())
+        prec = tp / said.sum() if said.sum() else None
+        rec = tp / sslow.sum() if sslow.sum() else None
+        f1 = (2 * prec * rec / (prec + rec)) if prec and rec else (0.0 if sslow.sum() else None)
+        out |= {"slow_sys": int(sslow.sum()), "precision_sys": round(prec, 3) if prec is not None else None,
+                "recall_sys": round(rec, 3) if rec is not None else None, "f1_sys": round(f1, 3) if f1 is not None else None}
     return out
 
 
@@ -382,15 +428,26 @@ def evaluate(days: list[Day], ctx: Context, panel: list[dict], done: dict | None
             st = [ctx.status(line, test.issue[k]) for line in lines]
             dep = test.issue[k] + timedelta(minutes=int(test.horizon[k]))
             rules[k] = rules_prediction(j, dep, test.issue[k], st, lines, cache)
+        amend3 = d.day >= AMEND3_FROM
+        if amend3:
+            for dd in days[:i + 1]:
+                if built[dd.day].delta is None:
+                    built[dd.day].delta = status_delta(built[dd.day], ctx, pmap, cache)
+            g3 = predict_gbm(fit_gbm([built[dd.day] for dd in days[:i] if len(built[dd.day])], with_delta=True),
+                             test)
         res: dict = {}
         for h in HORIZONS:
             idx = np.flatnonzero(test.horizon == h)
             res[str(h)] = {"rules": score(test, idx, rules), "usual": score(test, idx, test.usual),
                            "persistence": score(test, idx, test.persistence),
                            "journey_gbm": score(test, idx, g[0.5], g[0.1], g[0.9])}
+            if amend3:
+                res[str(h)] |= {"usual_status": score(test, idx, test.usual + test.delta),
+                                "journey_gbm_status": score(test, idx, g3[0.5], g3[0.1], g3[0.9])}
         per_day[d.day] = res
     return {"days": [d.day for d in days], "test_days": sorted(per_day), "per_day": per_day,
-            "decision": decide(per_day), "registered": "docs/journey-model.md (17 Nov 2026)"}
+            "decision": decide(per_day), "amendment3": decide_amendment3(per_day),
+            "registered": "docs/journey-model.md (17 Nov 2026; Amendment 3 the same day)"}
 
 
 def decide(per_day: dict) -> dict:
@@ -432,6 +489,43 @@ def decide(per_day: dict) -> dict:
         if ok and (summary["30"][c]["f1"] or 0) >= (summary["30"]["rules"]["f1"] or 0):
             return {"status": "baseline", "winner": c, "checks": checks, "summary": summary}
     return {"status": "no_change", "winner": "rules", "checks": checks, "summary": summary}
+
+
+AMEND3_CANDIDATES = ("rules", "usual", "persistence", "journey_gbm", "usual_status", "journey_gbm_status")
+
+
+def decide_amendment3(per_day: dict) -> dict:
+    """Amendment 3's rule, on test days from AMEND3_FROM only: usual_status or journey_gbm_status replaces the rules
+    if it beats them by 5% (MAE) at 30 and 60 minutes, on two-thirds of days at both, with an F1 for "slow around
+    this time" at 30 minutes no lower than the rules' (and, for the model, p10-p90 coverage within 70-90%). If both
+    qualify, the lower MAE at 30 minutes."""
+    test_days = sorted(d for d in per_day if d >= AMEND3_FROM and "usual_status" in per_day[d]["30"])
+    summary: dict = {}
+    for h in map(str, HORIZONS):
+        summary[h] = {}
+        for c in AMEND3_CANDIDATES:
+            vals = {k: [per_day[d][h][c][k] for d in test_days if per_day[d][h][c].get(k) is not None]
+                    for k in ("mae", "f1", "f1_sys", "coverage")}
+            summary[h][c] = {k: round(statistics.fmean(v), 3) if v else None for k, v in vals.items()}
+    if len(test_days) < MIN_TEST_DAYS_TO_PROMOTE:
+        return {"status": "waiting", "test_days": test_days, "summary": summary,
+                "message": f"{len(test_days)} test days from {AMEND3_FROM}; {MIN_TEST_DAYS_TO_PROMOTE} needed."}
+    passed = []
+    for c in ("usual_status", "journey_gbm_status"):
+        ok = all(summary[h][c]["mae"] is not None and summary[h]["rules"]["mae"] is not None
+                 and summary[h][c]["mae"] <= summary[h]["rules"]["mae"] * (1 - MAE_GAIN)
+                 and sum(per_day[d][h][c]["mae"] < per_day[d][h]["rules"]["mae"] for d in test_days)
+                 >= len(test_days) * WIN_SHARE for h in ("30", "60"))
+        ok = ok and (summary["30"][c]["f1_sys"] or 0) >= (summary["30"]["rules"]["f1_sys"] or 0)
+        if c == "journey_gbm_status":
+            cov = summary["30"][c]["coverage"]
+            ok = ok and cov is not None and COVERAGE[0] <= cov <= COVERAGE[1]
+        if ok:
+            passed.append(c)
+    if passed:
+        w = min(passed, key=lambda c: summary["30"][c]["mae"])
+        return {"status": "winner", "winner": w, "passed": passed, "test_days": test_days, "summary": summary}
+    return {"status": "no_change", "winner": "rules", "test_days": test_days, "summary": summary}
 
 
 REPORT = "journey_eval"  # an AppSecret row: the latest evaluation (per-day results are kept and reused)
