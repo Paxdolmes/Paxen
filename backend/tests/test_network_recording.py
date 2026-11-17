@@ -166,13 +166,13 @@ def test_replay_matches_live_inference(session):
         {r for r in live if r[2] <= end.replace(tzinfo=None) - timedelta(minutes=2)}
 
 
-def test_operational_records_go_after_a_week_training_data_stays(session):
+def test_operational_records_go_after_two_days_training_data_stays(session):
     from datetime import timedelta
 
     from paxen.db import LineStatusSnapshot, Prediction, RawSnapshot
     from paxen.recorder import prune
 
-    for days in (6, 8):
+    for days in (1.5, 2.5):
         t = (MORNING - timedelta(days=days)).replace(tzinfo=None)
         session.add(RawSnapshot(source="tfl", endpoint="line_status", polled_at=t, status=200))
         session.add(LineStatusSnapshot(source="tfl", polled_at=t, line_id="victoria", line_name="Victoria", mode="tube",
@@ -181,5 +181,9 @@ def test_operational_records_go_after_a_week_training_data_stays(session):
                                vehicle_id="1", expected_arrival=t, tts_s=60))
     session.commit()
     prune(session, MORNING, prediction_days=60)
+    # poll records and status snapshots are only read back 20 minutes and 24 hours; the status history is kept
+    # permanently as context_events
     assert session.query(RawSnapshot).count() == 1 and session.query(LineStatusSnapshot).count() == 1
     assert session.query(Prediction).count() == 2  # training data follows its own 60-day retention
+    prune(session, MORNING, prediction_days=0)  # 0: training data is kept for good
+    assert session.query(Prediction).count() == 2

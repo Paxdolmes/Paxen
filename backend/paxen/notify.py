@@ -87,9 +87,16 @@ def note_worker(s, now: datetime) -> None:
 
     import os
 
+    from . import archive, recorder
+
     value = json.dumps({"apns_configured": apns.configured(), "seen_at": now.isoformat(),
-                        # how many days of predictions and arrivals the worker keeps (recorder.prune)
-                        "prediction_retention_days": int(os.getenv("PAXEN_PREDICTION_RETENTION_DAYS", "60"))})
+                        # how many days of predictions and arrivals the worker keeps (recorder.prune; 0: forever)
+                        "prediction_retention_days": int(os.getenv("PAXEN_PREDICTION_RETENTION_DAYS", "60")),
+                        # the raw archive (R2): configured, and when a write last worked or failed
+                        "archive": {"configured": bool(os.getenv("PAXEN_ARCHIVE_URL", "").strip()), **archive.status},
+                        # the disk safety switch (recorder.recording_allowed)
+                        "db_pause_mb": int(os.getenv("PAXEN_DB_PAUSE_MB", str(recorder.DEFAULT_PAUSE_MB)) or 0),
+                        "recording_paused": recorder.PAUSED})
     row = s.get(AppSecret, WORKER_STATUS)
     if row:
         row.value = value

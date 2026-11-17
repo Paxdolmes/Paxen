@@ -45,6 +45,12 @@ class LocalArchive:
         path.write_bytes(data)
         return f"file://{path}"
 
+    def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        return self.put(key, data)
+
+    def get_bytes(self, key: str) -> bytes:
+        return (self.root / key).read_bytes()
+
 
 class S3Archive:
     def __init__(self, bucket: str, prefix: str, client=None):
@@ -61,6 +67,16 @@ class S3Archive:
                                ContentEncoding="gzip")
         return f"s3://{self.bucket}/{full}"
 
+    def put_bytes(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        """A file stored as it is (not a gzip-encoded JSON response like put())."""
+        full = f"{self.prefix}/{key}" if self.prefix else key
+        self.client.put_object(Bucket=self.bucket, Key=full, Body=data, ContentType=content_type)
+        return f"s3://{self.bucket}/{full}"
+
+    def get_bytes(self, key: str) -> bytes:
+        full = f"{self.prefix}/{key}" if self.prefix else key
+        return self.client.get_object(Bucket=self.bucket, Key=full)["Body"].read()
+
 
 @lru_cache(maxsize=1)
 def get_archive():
@@ -76,6 +92,8 @@ def get_archive():
 
 
 _warned: set[str] = set()
+# What this process last saw, for /v1/health (via the worker's status note): proof that writes are succeeding.
+status: dict = {"last_ok_at": None, "last_error": None, "last_error_at": None, "writes": 0, "failures": 0}
 
 
 def _warn_once(msg: str) -> None:
@@ -96,7 +114,11 @@ def archive_raw(source: str, name: str, when: datetime, raw: str | bytes, archiv
         return None
     try:
         data = raw if isinstance(raw, bytes) else raw.encode()
-        return archive.put(object_key(source, name, when), gzip.compress(data, compresslevel=6))
+        key = archive.put(object_key(source, name, when), gzip.compress(data, compresslevel=6))
+        status.update(last_ok_at=aware(when).isoformat(), writes=status["writes"] + 1)
+        return key
     except Exception as e:
         log.warning("archive write failed (%s): %s", name, e)
+        status.update(last_error=type(e).__name__, last_error_at=aware(when).isoformat(),
+                      failures=status["failures"] + 1)
         return None

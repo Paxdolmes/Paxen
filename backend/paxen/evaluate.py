@@ -287,7 +287,8 @@ def load_daily(s: Session, source: str, methods: tuple[str, ...] | None, seed: i
 
 
 def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = KEEP_FULL_DAYS,
-                 max_days: int = THIN_DAYS_PER_RUN, pause_s: float = THIN_PAUSE_S) -> dict:
+                 max_days: int = THIN_DAYS_PER_RUN, pause_s: float = THIN_PAUSE_S,
+                 exported: set[str] | None = None) -> dict:
     """Storage. The recorder keeps ~1.8 million predictions a day, but load_daily only ever reads every stride-th one
     (by id) of a busy day. Once a day is old enough, delete the rest. The day's stride is recorded first, so
     load_daily goes on reading exactly the same predictions (no evaluation or training result changes; tests check
@@ -308,6 +309,8 @@ def thin_history(s: Session, source: str, now: datetime, keep_full_days: int = K
         rec = s.get(DaySample, (source, key))
         if rec and rec.thinned:
             continue
+        if exported is not None and key not in exported:
+            continue  # with the history store on, a day is thinned only once it is safely there in full
         if not rec:
             rec = DaySample(source=source, day=key, stride=day_stride(s, source, day, nxt), thinned=False)
             s.add(rec)
