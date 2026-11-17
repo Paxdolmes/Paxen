@@ -865,9 +865,21 @@ def journeys_report(u: User = Depends(current_user), s: Session = Depends(db)):
 
     from .journey_eval import REPORT as EVAL
 
-    row, ev = s.get(AppSecret, REPORT), s.get(AppSecret, EVAL)
+    from sqlalchemy import case, func
+
+    from .db import ExportedDay
+    from .workers import THIN_STATUS
+
+    row, ev, prog = s.get(AppSecret, REPORT), s.get(AppSecret, EVAL), s.get(AppSecret, THIN_STATUS)
+    # what the history store holds, per table: days, how many are partial (thinned before the store existed)
+    store = {t: {"days": n, "partial": int(p or 0), "rows": int(r or 0), "mb": round((b or 0) / 1e6, 1)}
+             for t, n, p, r, b in s.execute(
+                 select(ExportedDay.table, func.count(), func.sum(case((ExportedDay.partial, 1), else_=0)),
+                        func.sum(ExportedDay.rows), func.sum(ExportedDay.bytes))
+                 .where(ExportedDay.source == get_provider().name).group_by(ExportedDay.table))}
     return {"replay": json.loads(row.value) if row else {"days": {}},
-            "evaluation": json.loads(ev.value) if ev else {"status": "not run yet"}}
+            "evaluation": json.loads(ev.value) if ev else {"status": "not run yet"},
+            "store": store, "pipeline": json.loads(prog.value) if prog else None}
 
 
 @app.get("/v1/insights")
