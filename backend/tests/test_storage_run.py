@@ -147,3 +147,35 @@ def test_a_day_of_the_history_store_can_be_downloaded(monkeypatch, tmp_path):
                     s.commit()
     finally:
         arch.get_archive.cache_clear()
+
+
+def test_without_the_store_measured_arrivals_come_from_the_database(monkeypatch):
+    import io
+
+    import pyarrow.parquet as pq
+    from fastapi.testclient import TestClient
+
+    import paxen.main as main
+    from paxen.db import SessionLocal
+
+    monkeypatch.delenv("PAXEN_ARCHIVE_URL", raising=False)
+    arch.get_archive.cache_clear()
+    t = datetime(2001, 1, 5, 9, 0)
+    with TestClient(main.app) as c:
+        with SessionLocal() as s:
+            s.add(ObservedArrival(source="sim", stop_id=A, line_id="district", vehicle_id="501", direction="eastbound",
+                                  arrived_at=t, earliest=t, latest=t, method="trackernet", quality=1.0))
+            s.commit()
+        try:
+            c.headers["Authorization"] = "Bearer " + c.post("/v1/users").json()["token"]
+            r = c.get("/v1/journeys/history/observed_arrivals/2001-01-05")
+            assert r.status_code == 200
+            assert pq.read_table(io.BytesIO(r.content)).column("vehicle_id").to_pylist() == ["501"]
+            assert c.get("/v1/journeys/history/observed_arrivals/2001-01-06").status_code == 404
+            assert c.get("/v1/journeys/history/journey_times/2001-01-05").status_code == 503
+            assert c.get("/v1/journeys/history/observed_arrivals/..%2Fsecrets").status_code == 404
+            c.delete("/v1/me")
+        finally:
+            with SessionLocal() as s:
+                s.query(ObservedArrival).filter(ObservedArrival.arrived_at == t).delete()
+                s.commit()
