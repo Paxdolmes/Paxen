@@ -99,10 +99,27 @@ jobs:
 
       - name: Build and sign
         working-directory: mobile/ios
+        # The full output is tens of thousands of lines: it goes to a file, and only the end is shown, or, when the
+        # build fails, every error line and what came just before the first one (a build script's own output
+        # isn't in the last lines, which is how build 24's failure went unexplained)
         run: |
-          set -o pipefail
-          xcodebuild -workspace Paxen.xcworkspace -scheme Paxen -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive | tail -n 200
+          log="$RUNNER_TEMP/xcodebuild.log"
+          if xcodebuild -workspace Paxen.xcworkspace -scheme Paxen -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Paxen.xcarchive" archive > "$log" 2>&1; then
+            tail -n 40 "$log"
+            exit 0
+          fi
+          echo "::group::Every error line"
+          grep -n -E "error:|fatal error|Command .* failed|\*\* .* FAILED \*\*" "$log" | cut -c1-400 | head -n 100
+          echo "::endgroup::"
+          first=$(grep -n -m1 -E "error:" "$log" | cut -d: -f1 || true)
+          if [ -n "$first" ]; then
+            echo "::group::The 60 lines before the first error, and 20 after"
+            sed -n "$(( first > 60 ? first - 60 : 1 )),$(( first + 20 ))p" "$log" | cut -c1-600
+            echo "::endgroup::"
+          fi
+          tail -n 60 "$log" | cut -c1-600
+          exit 1
 
       - name: Upload to TestFlight
         working-directory: mobile/ios
