@@ -1,0 +1,102 @@
+# Builds the iPhone app exactly as for TestFlight (Release, the same JavaScript bundle) but for the iOS Simulator, opens
+# it, watches it for a minute and prints whether it's still running, the app's console, any crash report and its
+# log, with a screenshot as an artifact. For finding a crash on launch without a phone. No signing, no upload.
+name: iPhone app in the simulator
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Mac to build on (macos-15-intel while GitHub is short of Apple-silicon Macs)"
+        type: choice
+        options: [macos-15-intel, macos-latest, macos-26, macos-15]
+        default: macos-15-intel
+concurrency: simulator
+jobs:
+  simulator:
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
+    timeout-minutes: 120
+    env:
+      EXPO_PUBLIC_PAXEN_API_URL: ${{ vars.PAXEN_API_URL || 'https://paxen-production.up.railway.app' }}
+      EXPO_NO_TELEMETRY: "1"
+      PAXEN_WIDGETS: "0"
+      IOS_BUILD_NUMBER: ${{ github.run_number }}
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Xcode
+        run: |
+          sw_vers
+          x=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | grep -v -i -e beta -e release_candidate -e _rc | sort -V | tail -1)
+          if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
+          xcodebuild -version
+      - run: npm ci
+      - run: node scripts/patch-expo-modules-jsi.mjs
+      - name: Generate the iOS project (expo prebuild, CocoaPods)
+        run: npx expo prebuild --platform ios --clean --no-install && cd ios && pod install
+      - name: Build for the simulator (Release, as TestFlight)
+        working-directory: mobile/ios
+        run: |
+          log="$RUNNER_TEMP/xcodebuild.log"
+          arch=$(uname -m)
+          if xcodebuild -workspace Paxen.xcworkspace -scheme Paxen -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/dd" \
+            ARCHS="$arch" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build > "$log" 2>&1; then
+            tail -n 10 "$log"
+            exit 0
+          fi
+          grep -n -E "error:|fatal error|\*\* .* FAILED \*\*" "$log" | cut -c1-400 | head -n 80
+          tail -n 60 "$log" | cut -c1-600
+          exit 1
+      - name: Open the app and watch it for a minute
+        run: |
+          set +e
+          out="$RUNNER_TEMP/sim"; mkdir -p "$out"
+          app=$(find "$RUNNER_TEMP/dd/Build/Products/Release-iphonesimulator" -maxdepth 1 -name "*.app" | head -1)
+          echo "app: $app"
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          for runtime in sorted(d, reverse=True):
+              if "iOS" in runtime:
+                  phones = [x for x in d[runtime] if x["name"].startswith("iPhone")]
+                  if phones:
+                      print(phones[0]["udid"]); break')
+          echo "simulator: $udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          bundle=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")
+          xcrun simctl launch --console-pty "$udid" "$bundle" > "$out/console.log" 2>&1 &
+          sleep 75
+          xcrun simctl io "$udid" screenshot "$out/screen.png"
+          if xcrun simctl spawn "$udid" launchctl list | grep -q "UIKitApplication:$bundle"; then
+            echo "RESULT: still running after 75 seconds"
+          else
+            echo "RESULT: NOT running after 75 seconds (crashed or quit)"
+          fi
+          echo "::group::App console (last 200 lines)"
+          tail -n 200 "$out/console.log" | cut -c1-500
+          echo "::endgroup::"
+          echo "::group::Crash reports"
+          for f in ~/Library/Logs/DiagnosticReports/*; do
+            case "$f" in *Paxen*|*paxen*) echo "== $f"; cp "$f" "$out/"; head -c 30000 "$f"; echo;; esac
+          done
+          echo "::endgroup::"
+          echo "::group::System log for the app (last 3 minutes)"
+          xcrun simctl spawn "$udid" log show --last 3m --style compact \
+            --predicate 'process == "Paxen" OR eventMessage CONTAINS[c] "paxen"' 2>/dev/null | tail -n 300 | cut -c1-500
+          echo "::endgroup::"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-run
+          path: ${{ runner.temp }}/sim
+          if-no-files-found: ignore

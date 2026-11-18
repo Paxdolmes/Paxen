@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from testflight_testers import BUNDLE, call, err  # noqa: E402
 
 GROUP = "Friends"
+SKIP_FILE = Path(__file__).resolve().parents[1] / "testflight-skip.txt"
 PRIVACY_URL = os.environ.get("PRIVACY_URL") or "https://paxen-production.up.railway.app/privacy"
 DESCRIPTION = os.environ.get("APP_DESCRIPTION") or (
     "Paxen is a commute assistant for London. Save your Home and Work, and it learns your normal journey, watches "
@@ -84,12 +85,21 @@ def main() -> None:
         group = d.get("data", group)
     gid = group["id"]
 
+    # Builds known to be broken (.github/testflight-skip.txt) never go to friends, and come out of the group
+    skip = {x.split("#")[0].strip() for x in SKIP_FILE.read_text().splitlines()} - {""} if SKIP_FILE.exists() else set()
+    code, d = call("GET", f"/betaGroups/{gid}/builds?limit=50")
+    for b in d.get("data", []):
+        if b["attributes"]["version"] in skip:
+            code, r = call("DELETE", f"/betaGroups/{gid}/relationships/builds", {"data": [{"type": "builds", "id": b["id"]}]})
+            print(f"Build {b['attributes']['version']} taken out of {GROUP} (known broken): {'ok' if code < 300 else err(r)}")
+
     # The latest valid build: "what to test", into the group, submitted for beta review
     code, d = call("GET", f"/builds?filter[app]={aid}&filter[processingState]=VALID&filter[expired]=false"
-                          f"&sort=-uploadedDate&limit=1")
-    if not d.get("data"):
-        sys.exit("No processed build yet")
-    b = d["data"][0]
+                          f"&sort=-uploadedDate&limit=20")
+    usable = [b for b in d.get("data", []) if b["attributes"]["version"] not in skip]
+    if not usable:
+        sys.exit("No processed build yet (or only known-broken ones)")
+    b = usable[0]
     bid, ver = b["id"], b["attributes"]["version"]
     code, d = call("GET", f"/builds/{bid}/betaBuildLocalizations")
     if not any(x["attributes"].get("whatsNew") for x in d.get("data", [])):
