@@ -10,12 +10,17 @@ on:
         description: "Include the home-screen widget and lock-screen trip (needs the App Group: docs/iphone-app.md)"
         type: boolean
         default: false
+      runner:
+        description: "Mac to build on (if macos-latest isn't being given a Mac, try a specific version)"
+        type: choice
+        options: [macos-latest, macos-26, macos-15]
+        default: macos-latest
 
 concurrency: testflight
 
 jobs:
   testflight:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     timeout-minutes: 60
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -37,6 +42,16 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
+      # App Store Connect only takes builds made with Xcode 26 or later: if the runner's default Xcode is older, use
+      # the newest Xcode 26 release installed on it
+      - name: Xcode
+        run: |
+          sw_vers
+          if ! xcodebuild -version | grep -q "^Xcode 2[6-9]"; then
+            x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -v -i -e beta -e release_candidate | sort -V | tail -1)
+            if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
+          fi
+          xcodebuild -version
       - run: npm ci
       - run: npm run check-shared && npm run typecheck && npx eslint . && npm test
 
