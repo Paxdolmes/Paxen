@@ -77,5 +77,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   experiments: { typedRoutes: false },
   extra: {
     apiUrl: process.env.EXPO_PUBLIC_PAXEN_API_URL || 'https://paxen-production.up.railway.app',
+    // Whether this build has the widget extension: without it the app never touches the widget native module.
+    widgets: WIDGETS,
   },
 })
