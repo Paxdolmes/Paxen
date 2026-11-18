@@ -153,6 +153,9 @@ def export_pending(s: Session, source: str, now: datetime, archive, max_days: in
                                           .where(ExportedDay.source == source))}
     thinned = {d for (d,) in s.execute(select(DaySample.day).where(DaySample.source == source,
                                                                      DaySample.thinned.is_(True)))}
+    from .recorder import pause_intervals
+
+    pauses = pause_intervals(s, now)  # a day recording was paused in is incomplete: rebuilt like a thinned one
     # Days still complete in the database go first: they hold the full detail, and thinning (which keeps the disk
     # in check) waits for them. Older, already-thinned days are backfilled after.
     days = sorted(_days_with_data(s, source), key=lambda d: (d in thinned, d))
@@ -175,8 +178,10 @@ def export_pending(s: Session, source: str, now: datetime, archive, max_days: in
             back = pq.ParquetFile(io.BytesIO(archive.get_bytes(key))).metadata.num_rows
             if back != rows:
                 raise RuntimeError(f"history check failed for {key}: wrote {rows} rows, read back {back}")
+            a, b = _day_bounds(day)
+            paused = any(p0 < b and p1 > a for p0, p1 in pauses)
             s.add(ExportedDay(source=source, table=table, day=day, key=key, rows=rows, bytes=len(data),
-                              partial=day in thinned))
+                              partial=day in thinned or paused))
             s.commit()
             out["rows"] += rows
             out["mb"] = round(out["mb"] + len(data) / 1e6, 1)

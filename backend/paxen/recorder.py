@@ -410,6 +410,48 @@ DEFAULT_PAUSE_MB = 4200
 RESUME_BELOW_MB = 100  # resume only this far under the limit, so it doesn't flap on and off
 _db_size: tuple[datetime, int] | None = None
 PAUSED: dict | None = None  # {"since", "db_mb", "limit_mb"} while recording is paused
+PAUSES = "recording_pauses"  # AppSecret: every pause as [start, end or null], so those days can be rebuilt
+_pause_log_checked = False
+
+
+def _log_pause(s: Session, now: datetime, starting: bool) -> None:
+    """Keep the pause log: a pause opens an entry (unless one is already open, e.g. after a restart while
+    paused), a resume closes it. Days that overlap a pause are rebuilt from the raw archive (history.py)."""
+    import json
+
+    from .db import AppSecret
+
+    try:
+        row = s.get(AppSecret, PAUSES)
+        log_ = json.loads(row.value) if row else []
+        open_ = bool(log_) and log_[-1][1] is None
+        if starting and not open_:
+            log_.append([aware(now).isoformat(), None])
+        elif not starting and open_:
+            log_[-1][1] = aware(now).isoformat()
+        else:
+            return
+        if row is None:
+            s.add(AppSecret(name=PAUSES, value=json.dumps(log_)))
+        else:
+            row.value = json.dumps(log_)
+        s.commit()
+    except Exception:
+        log.exception("couldn't update the recording pause log")
+        s.rollback()
+
+
+def pause_intervals(s: Session, now: datetime) -> list[tuple[datetime, datetime]]:
+    """Every recording pause (naive UTC), an open one ending now."""
+    import json
+
+    from .db import AppSecret
+
+    row = s.get(AppSecret, PAUSES)
+    if not row:
+        return []
+    return [(naive_utc(datetime.fromisoformat(a)), naive_utc(datetime.fromisoformat(b)) if b else naive_utc(now))
+            for a, b in json.loads(row.value)]
 
 
 def db_size_mb(s: Session, now: datetime) -> int | None:
@@ -430,10 +472,12 @@ def recording_allowed(s: Session, now: datetime) -> bool:
     until the limit is raised or old days are moved out (history.py)."""
     import os
 
-    global PAUSED
+    global PAUSED, _pause_log_checked
     limit = int(os.getenv("PAXEN_DB_PAUSE_MB", str(DEFAULT_PAUSE_MB)) or 0)
     if limit <= 0:
-        PAUSED = None
+        if PAUSED is not None or not _pause_log_checked:
+            _log_pause(s, now, starting=False)
+        PAUSED, _pause_log_checked = None, True
         return True
     try:
         mb = db_size_mb(s, now)
@@ -445,11 +489,16 @@ def recording_allowed(s: Session, now: datetime) -> bool:
     if PAUSED is None and mb >= limit:
         PAUSED = {"since": aware(now).isoformat(), "db_mb": mb, "limit_mb": limit}
         log.error("database at %s MB, over PAXEN_DB_PAUSE_MB=%s: recording train data is paused", mb, limit)
+        _log_pause(s, now, starting=True)
     elif PAUSED is not None and mb < limit - RESUME_BELOW_MB:
         log.warning("database at %s MB, under PAXEN_DB_PAUSE_MB=%s again: recording resumes", mb, limit)
         PAUSED = None
+        _log_pause(s, now, starting=False)
     elif PAUSED is not None:
         PAUSED = {**PAUSED, "db_mb": mb, "limit_mb": limit}
+    elif not _pause_log_checked:
+        _log_pause(s, now, starting=False)  # restarted after a pause and recording: close it
+    _pause_log_checked = True
     return PAUSED is None
 
 
