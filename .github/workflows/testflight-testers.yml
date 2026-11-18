@@ -45,5 +45,9 @@ jobs:
           CONTACT_LAST: ${{ inputs.contact_last }}
           CONTACT_PHONE: ${{ inputs.contact_phone }}
           CONTACT_EMAIL: ${{ inputs.contact_email }}
+      # Crash reports testers shared from TestFlight (technical details only: the repository is public)
+      - name: Crash reports
+        if: always()
+        run: python .github/scripts/testflight_crashes.py || true
       - if: always()
         run: rm -f "$ASC_KEY_PATH"

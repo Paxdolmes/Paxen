@@ -1,0 +1,3 @@
+# TestFlight build numbers that must never go to friends (the public link): the "TestFlight testers" workflow takes
+# them out of the Friends group and never adds them. One per line; text after # is a comment.
+27  # crashes when opened (18 Nov 2026)
