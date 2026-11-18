@@ -1,0 +1,47 @@
+# When GitHub is short of Macs, an iPhone build can wait in the queue and then be cancelled without ever starting
+# ("The job was not acquired by Runner of type hosted"). Every half hour this checks the latest "iPhone app to
+# TestFlight" run and, only if it was cancelled that way (no Mac ever picked it up), starts it again on the next kind
+# of Mac in turn. It never repeats a build that ran (passed or failed), one cancelled by hand after it started, or
+# one older than 12 hours, and gives up after 12 tries in a row.
+name: iPhone build, try again if no Mac was free
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const workflow_id = 'ios-testflight.yml'
+            const runners = ['macos-15-intel', 'macos-latest', 'macos-15', 'macos-26']
+            const { data } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id, per_page: 20 })
+            const runs = data.workflow_runs
+            if (!runs.length) return core.info('No iPhone builds yet.')
+            const neverStarted = async (run) => {
+              if (run.conclusion !== 'cancelled') return false
+              const jobs = (await github.rest.actions.listJobsForWorkflowRun({ owner, repo, run_id: run.id })).data.jobs
+              return jobs.length > 0 && jobs.every((j) => !j.runner_name && !(j.steps || []).length)
+            }
+            const latest = runs[0]
+            if (latest.status !== 'completed') return core.info(`Build ${latest.run_number} is ${latest.status}: nothing to do.`)
+            if (!(await neverStarted(latest))) return core.info(`Build ${latest.run_number} ran (${latest.conclusion}): nothing to do.`)
+            if (Date.now() - new Date(latest.created_at).getTime() > 12 * 3600e3) return core.info('Too old to retry.')
+            let tries = 0
+            for (const r of runs) {
+              if (r.head_sha !== latest.head_sha || !(await neverStarted(r))) break
+              tries++
+            }
+            if (tries >= 12) return core.warning(`Gave up: ${tries} builds in a row found no Mac.`)
+            const runner = runners[tries % runners.length]
+            await github.rest.actions.createWorkflowDispatch({
+              owner, repo, workflow_id, ref: latest.head_branch, inputs: { runner }, // (widgets: its default, off)
+            })
+            core.notice(`Build ${latest.run_number} never got a Mac (${tries} in a row): started again on ${runner}.`)
