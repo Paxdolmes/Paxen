@@ -42,15 +42,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      # App Store Connect only takes builds made with Xcode 26 or later: if the runner's default Xcode is older, use
-      # the newest Xcode 26 release installed on it
+      # The newest Xcode release installed on the runner, whatever its default: App Store Connect only takes builds
+      # made with Xcode 26 or later, and Expo's Swift code needs a recent compiler (build 25 failed on the Intel Mac's
+      # default Xcode 26.3: "sending 'slot' risks causing data races" in expo-modules-jsi)
       - name: Xcode
         run: |
           sw_vers
-          if ! xcodebuild -version | grep -q "^Xcode 2[6-9]"; then
-            x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -v -i -e beta -e release_candidate | sort -V | tail -1)
-            if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
-          fi
+          ls -d /Applications/Xcode*.app
+          x=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | grep -v -i -e beta -e release_candidate -e _rc | sort -V | tail -1)
+          if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
           xcodebuild -version
       - run: npm ci
       - run: npm run check-shared && npm run typecheck && npx eslint . && npm test
