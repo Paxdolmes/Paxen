@@ -157,7 +157,10 @@ Measured on live data (3 Nov 2026):
   least 10 days there.
 - **Disk safety switch** (`PAXEN_DB_PAUSE_MB`, default 4200 for the 5 GB Hobby volume; 0 turns it off). A full disk
   stops every write and can stop Postgres, so over this size the worker stops saving train data to the database
-  and keeps everything else running. The raw responses still go to the R2 archive, so those hours can be rebuilt.
+  and keeps everything else running. The raw responses still go to the R2 archive, so those hours can be rebuilt,
+  and they are rebuilt automatically: every pause is logged (`app_secrets.recording_pauses`), a day that overlaps
+  one is exported as partial, and the 2-hourly run rebuilds its measured Tube arrivals from the archive before
+  the journey replay uses it.
   `/v1/health` shows `data.push.worker.recording_paused` and whether archive writes are succeeding
   (`data.push.worker.archive`). With a bigger volume, set it about 0.8 GB under the volume size.
 - **Railway compute** (Hobby: $5/month covers the first $5 of usage). The database is the biggest user. To keep it

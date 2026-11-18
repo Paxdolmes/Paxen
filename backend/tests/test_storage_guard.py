@@ -50,3 +50,48 @@ def test_while_paused_trains_go_to_the_archive_only(monkeypatch, session):
     assert session.query(ObservedArrival).count() == 0
     out = recorder.record_trackernet(session, Tn(), MORNING, present={})
     assert out["measured_arrivals"] > 0
+
+
+def test_pauses_are_logged_and_paused_days_are_rebuilt_from_the_archive(monkeypatch, session, tmp_path):
+    """A day recording was paused in is incomplete in the database: it's exported as partial, so the worker
+    rebuilds its measured arrivals from the raw archive, as for days thinned before the history store."""
+    from paxen import history
+    from paxen.archive import LocalArchive
+    from paxen.db import ExportedDay, ObservedArrival
+
+    monkeypatch.setattr(recorder, "PAUSED", None)
+    monkeypatch.setattr(recorder, "_pause_log_checked", False)
+    monkeypatch.setenv("PAXEN_DB_PAUSE_MB", "4200")
+    sizes = iter([4100, 4250, 4250, 4050])
+    monkeypatch.setattr(recorder, "db_size_mb", lambda s, now: next(sizes))
+    t = MORNING  # Tuesday 3 Nov, 08:20
+    assert recorder.recording_allowed(session, t)
+    assert not recorder.recording_allowed(session, t + timedelta(hours=1))  # paused 09:20
+    monkeypatch.setattr(recorder, "PAUSED", None)  # the worker restarts while paused: one pause, not two
+    assert not recorder.recording_allowed(session, t + timedelta(hours=2))
+    assert recorder.recording_allowed(session, t + timedelta(hours=26))  # resumes Wednesday 10:20
+    pauses = recorder.pause_intervals(session, t)
+    assert pauses == [((t + timedelta(hours=1)).replace(tzinfo=None), (t + timedelta(hours=26)).replace(tzinfo=None))]
+    for day_offset in range(3):  # an arrival on each of Tue, Wed, Thu
+        a = (t + timedelta(days=day_offset)).replace(tzinfo=None)
+        session.add(ObservedArrival(source="tfl", stop_id="S", line_id="victoria", vehicle_id="1", arrived_at=a,
+                                    earliest=a, latest=a, method="trackernet", quality=1.0))
+    session.commit()
+    history.export_pending(session, "tfl", t + timedelta(days=4), LocalArchive(str(tmp_path)))
+    partial = {r.day: r.partial for r in session.query(ExportedDay).filter(ExportedDay.table == "observed_arrivals")}
+    assert partial == {"2026-11-03": True, "2026-11-04": True, "2026-11-05": False}
+
+
+def test_a_restart_after_a_pause_closes_it(monkeypatch, session):
+    import json
+
+    from paxen.db import AppSecret
+
+    session.add(AppSecret(name=recorder.PAUSES, value=json.dumps([["2026-11-03T08:00:00+00:00", None]])))
+    session.commit()
+    monkeypatch.setattr(recorder, "PAUSED", None)
+    monkeypatch.setattr(recorder, "_pause_log_checked", False)
+    monkeypatch.setenv("PAXEN_DB_PAUSE_MB", "8000")  # the limit was raised, then the worker restarted
+    monkeypatch.setattr(recorder, "db_size_mb", lambda s, now: 4300)
+    assert recorder.recording_allowed(session, MORNING)
+    assert recorder.pause_intervals(session, MORNING + timedelta(days=1))[0][1] == MORNING.replace(tzinfo=None)
