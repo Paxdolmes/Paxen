@@ -36,8 +36,11 @@ GitHub > **Actions** > **iPhone app to TestFlight** > **Run workflow** (about 20
 repository is public, so GitHub's standard Mac runners cost nothing). The build number goes up automatically.
 
 If a run sits at "Queued" and is cancelled after about 15 minutes without starting, GitHub didn't hand out a Mac
-for that label (it happened to builds 11, 14, 15 and 17-20). Run it again with **runner** set to a specific version
-(`macos-26`, then `macos-15`). The build switches to the newest Xcode 26 on the runner if its default is older,
+(builds 11, 14, 15 and 17-23). The run's page says why: "The job was not acquired by Runner of type hosted even
+after multiple attempts" and "Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer
+queue times". `macos-latest`, `macos-26` and `macos-15` are all Apple-silicon (arm64) Macs, so run it again with
+**runner** set to `macos-15-intel`, GitHub's Intel Mac, which draws on a separate pool (slower, but it builds the
+same app). The build switches to the newest Xcode 26 on the runner if its default is older,
 because App Store Connect only accepts builds made with Xcode 26 or later. When it's processed (another 5-30 minutes), add yourself in App Store Connect > the app >
 **TestFlight > Internal Testing**, and install it with the **TestFlight** app on your iPhone.
 
