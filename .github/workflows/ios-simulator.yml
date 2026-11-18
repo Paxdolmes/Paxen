@@ -107,6 +107,22 @@ jobs:
             case "$f" in *Paxen*|*paxen*) echo "== $f"; cp "$f" "$out/"; head -c 40000 "$f"; echo;; esac
           done
           echo "::endgroup::"
+          # Errors the app caught and reported instead of closing (mobile/src/lib/errors.ts), from the last 10 minutes
+          echo "::group::Errors the app reported"
+          curl -s "$api/v1/app-errors?limit=20" | python3 -c '
+          import json, sys
+          from datetime import datetime, timedelta, timezone
+          since = datetime.now(timezone.utc) - timedelta(minutes=10)
+          try:
+              rows = json.load(sys.stdin)
+          except ValueError:
+              rows = []
+          rows = [r for r in rows if isinstance(r, dict) and datetime.fromisoformat(r["at"].replace("Z", "+00:00")) >= since]
+          print("RESULT reported errors:", len(rows))
+          for r in rows:
+              print("== {} {} build {}: {}".format(r["at"], r["kind"], r["build"], r["message"]))
+              print("\n".join((r.get("stack") or "").splitlines()[:25]))'
+          echo "::endgroup::"
           echo "::group::System log for the app (last 6 minutes)"
           xcrun simctl spawn "$udid" log show --last 6m --style compact --predicate 'process == "Paxen"' 2>/dev/null \
             | grep -v -E "^Timestamp|libnetwork|nw_" | tail -n 400 | cut -c1-500

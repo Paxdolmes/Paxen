@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 from . import serialize as ser
 from . import timing
 from .config import settings
-from .db import Alert, BoardingReport, Commute, Place, SessionLocal, Trip, User, init_db
+from .db import Alert, AppError, BoardingReport, Commute, Place, SessionLocal, Trip, User, init_db
 from .domain import SEVERITY_ORDER
 from .engine import (
     clear_status_cache, current_statuses, default_depart_at, evaluate_commute, maybe_alert, route_key,
@@ -276,7 +277,68 @@ def health(s: Session = Depends(db)):
     except Exception as e:  # diagnostics only: never fail the health check over them
         s.rollback()
         out["data"] = {"error": type(e).__name__}
+    try:
+        out["app_errors"] = recent_app_errors(s)
+    except Exception as e:  # noqa: BLE001
+        s.rollback()
+        out["app_errors"] = {"error": type(e).__name__}
     return out
+
+
+# ------------------------------------------------------------- app error reports
+# The iPhone app reports JavaScript errors it caught (mobile/src/lib/errors.ts) instead of closing. Technical details
+# only and no account; scrubbed again here in case a message quotes something personal. The latest show in /v1/health.
+APP_ERRORS_KEEP = 300
+_SCRUB = [
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "<email>"),
+    (re.compile(r"Bearer\s+\S+", re.IGNORECASE), "Bearer <token>"),
+    (re.compile(r"https?://\S+"), "<url>"),
+    (re.compile(r"-?\d{1,3}\.\d{4,}"), "<number>"),  # coordinates
+    (re.compile(r"[A-Za-z0-9_-]{32,}"), "<id>"),  # tokens and long ids
+]
+
+
+def _scrub(text: str | None, limit: int) -> str | None:
+    if not text:
+        return None
+    for pattern, repl in _SCRUB:
+        text = pattern.sub(repl, text)
+    return text[:limit]
+
+
+class AppErrorIn(BaseModel):
+    kind: Literal["fatal", "error", "screen", "card", "promise"] = "error"
+    message: str = Field(min_length=1, max_length=2000)
+    stack: str | None = Field(default=None, max_length=20000)
+    build: str | None = Field(default=None, max_length=20)
+    platform: str | None = Field(default=None, max_length=10)
+
+
+@app.post("/v1/app-errors", status_code=204)
+def report_app_error(body: AppErrorIn, s: Session = Depends(db)):
+    s.add(AppError(kind=body.kind, build=body.build, platform=body.platform,
+                   message=_scrub(body.message, 1000) or "?", stack=_scrub(body.stack, 8000)))
+    s.flush()
+    newest = s.scalar(select(AppError.id).order_by(AppError.id.desc()).limit(1)) or 0
+    if newest > APP_ERRORS_KEEP:
+        s.execute(AppError.__table__.delete().where(AppError.id <= newest - APP_ERRORS_KEEP))
+    s.commit()
+    return Response(status_code=204)
+
+
+def recent_app_errors(s: Session, limit: int = 10) -> list[dict]:
+    """The latest error reports from the app, newest first, for /v1/health (the top of each stack only)."""
+    rows = s.scalars(select(AppError).order_by(AppError.id.desc()).limit(limit)).all()
+    return [{"at": r.at.isoformat() + "Z", "kind": r.kind, "build": r.build, "platform": r.platform,
+             "message": r.message, "stack": (r.stack or "").splitlines()[:12]} for r in rows]
+
+
+@app.get("/v1/app-errors")
+def app_errors(limit: int = Query(50, ge=1, le=APP_ERRORS_KEEP), s: Session = Depends(db)):
+    """Error reports from the app with their whole stacks (technical details only, as for /v1/health)."""
+    rows = s.scalars(select(AppError).order_by(AppError.id.desc()).limit(limit)).all()
+    return [{"at": r.at.isoformat() + "Z", "kind": r.kind, "build": r.build, "platform": r.platform,
+             "message": r.message, "stack": r.stack} for r in rows]
 
 
 # ------------------------------------------------------------------------ account

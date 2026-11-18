@@ -1,6 +1,6 @@
 """Paxen's privacy policy, served at /privacy. Keep it true to what the code does: if storage changes, change this."""
 
-UPDATED = "10 November 2026"
+UPDATED = "18 November 2026"
 CONTACT = "dan124@live.ie"
 
 PAGE = f"""<!doctype html>
@@ -35,6 +35,10 @@ full Paxen expected that train to be, so the fullness estimates can be checked. 
 <li><strong>Your settings</strong>: quiet hours, alert thresholds, and whether monitoring is paused.</li>
 <li><strong>A notification token</strong>, if you allow notifications. Apple (or your browser's push service) issues it so
 Paxen can send alerts to your device. It identifies the device for notifications only.</li>
+<li><strong>Error reports from the iPhone app.</strong> If the app runs into a fault in its own code, it sends the
+technical details (the error, where in the code it happened and the app version) so it can be fixed. They are not
+linked to your account and never include your places, journeys or position. Only the most recent few hundred are
+kept.</li>
 </ul>
 
 <h2>Location</h2>
@@ -50,7 +54,7 @@ go in between.</p>
 <h2>What Paxen does not do</h2>
 <ul>
 <li>No advertising, no ad tracking, no selling or sharing of your data.</li>
-<li>No analytics in the iPhone app.</li>
+<li>No analytics in the iPhone app (the error reports above are the only thing it sends on its own).</li>
 <li>Your data is never used to identify you, and never combined with data from other companies.</li>
 </ul>
 

@@ -54,6 +54,23 @@ because App Store Connect only accepts builds made with Xcode 26 or later. When 
   The daily "TestFlight testers" job opens that cache so GitHub doesn't delete it after 7 idle days; its log also
   lists the team's distribution certificates (Apple allows only a few).
 
+## Errors in the app (instead of crashes)
+In a release build React Native closes the app on any JavaScript error nothing caught (build 27 did this about 14
+seconds after opening). Since build 28 the app catches them:
+- Error boundaries (`mobile/src/components/boundary.tsx`) around the app, each screen's content, the live trip and each
+  part of Today. A part that can't be drawn shows a short note with Try again; the rest keeps working.
+- A handler loaded before anything else (`mobile/src/lib/errors.ts`) for errors outside React: reported, and the app
+  carries on.
+- Each error is sent once per session to `POST /v1/app-errors`: the error, its stack (function names are kept in the
+  release bundle by `mobile/metro.config.js`), the build number. No account, place or position; the server scrubs it
+  again and keeps the latest 300. The latest 10 show in `/v1/health` under `app_errors`; `GET /v1/app-errors` has the
+  full stacks.
+- The "iPhone app in the simulator" workflow builds the release app for the iOS Simulator, opens it twice with a
+  temporary set-up account (deleted afterwards) and prints whether it stayed open, its console, any crash report and
+  screenshots. Use it to check a build before sending it to TestFlight.
+- Crash reports testers share from TestFlight are printed by the daily "TestFlight testers" job (technical details
+  only). A build that must not reach friends goes in `.github/testflight-skip.txt`.
+
 ## Sharing with friends (public TestFlight link)
 The "TestFlight testers" workflow runs after every build. It keeps the team in the internal "Paxen team" group, and
 adds each new build to the external **Friends** group, which has a public link, then submits it for Apple's beta
