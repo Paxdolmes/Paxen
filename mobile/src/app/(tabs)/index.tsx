@@ -6,6 +6,7 @@ import { Screen } from '@/components/screen'
 import { Text } from '@/components/text'
 import { AutoTripsNudge, AwayToday, CommuteHero, ConditionsStrip, LinesOnRoutes, OtherCommuteCard, UpcomingCard } from '@/components/today'
 import { Button, Card, ErrorState, Section, Skeleton } from '@/components/ui'
+import { Boundary } from '@/components/boundary'
 
 export default function TodayScreen() {
   const { data: dashboard, error, mutate } = useDashboard()
@@ -43,22 +44,41 @@ export default function TodayScreen() {
         )}
       </View>
 
-      {active && <CommuteHero evaluation={active} onCompare={() => openRoutes(active.commute.id)} />}
-      {active && <AwayToday away={!!dashboard.user.away_today} active={active.active} />}
-      {active && <ConditionsStrip conditions={active.conditions} />}
+      {/* Each part on its own: if one can't be drawn, the rest of Today still shows (components/boundary.tsx). */}
+      {active && (
+        <Boundary level="card" label="Your commute" onRetry={() => void mutate()}>
+          <CommuteHero evaluation={active} onCompare={() => openRoutes(active.commute.id)} />
+        </Boundary>
+      )}
+      {active && (
+        <Boundary level="silent">
+          <AwayToday away={!!dashboard.user.away_today} active={active.active} />
+        </Boundary>
+      )}
+      {active && (
+        <Boundary level="silent">
+          <ConditionsStrip conditions={active.conditions} />
+        </Boundary>
+      )}
 
-      <AutoTripsNudge enabled={!!dashboard.user.auto_trips} />
+      <Boundary level="silent">
+        <AutoTripsNudge enabled={!!dashboard.user.auto_trips} />
+      </Boundary>
 
       {(dashboard.upcoming?.length ?? 0) > 0 && (
         <Section title="Coming up on your lines">
-          <UpcomingCard items={dashboard.upcoming ?? []} />
+          <Boundary level="card" label="This list">
+            <UpcomingCard items={dashboard.upcoming ?? []} />
+          </Boundary>
         </Section>
       )}
 
       {others.length > 0 && (
         <Section title="Your other commute">
           {others.map((c) => (
-            <OtherCommuteCard key={c.commute.id} evaluation={c} onOpen={() => openRoutes(c.commute.id)} />
+            <Boundary key={c.commute.id} level="card" label="This commute" onRetry={() => void mutate()}>
+              <OtherCommuteCard evaluation={c} onOpen={() => openRoutes(c.commute.id)} />
+            </Boundary>
           ))}
         </Section>
       )}
@@ -72,7 +92,9 @@ export default function TodayScreen() {
             </Button>
           }
         >
-          <LinesOnRoutes lines={onRoutes} />
+          <Boundary level="card" label="This list">
+            <LinesOnRoutes lines={onRoutes} />
+          </Boundary>
         </Section>
       )}
 

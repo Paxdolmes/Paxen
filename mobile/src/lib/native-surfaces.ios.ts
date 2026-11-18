@@ -1,4 +1,5 @@
 import type { EventSubscription } from 'expo'
+import Constants from 'expo-constants'
 import type { LiveActivity, LiveActivityFactory, Widget } from 'expo-widgets'
 import { api } from './api'
 import type { ActivityProps, WidgetProps } from './surface-data'
@@ -8,12 +9,14 @@ import type { ActivityProps, WidgetProps } from './surface-data'
 
 const STALE_MS = 5 * 60_000 // iOS greys the times if nothing refreshes them for this long
 
-// Loaded on first use, never at startup: registering a layout talks to the widget extension's shared storage, and
-// a build without the extension must start exactly as before. A failure here is remembered and never retried.
+// Loaded on first use: registering a layout talks to the widget extension's shared storage. A build without the
+// extension (app.config.ts `extra.widgets` false) never loads them at all: the module would still be there, writing
+// to the app's own settings instead. A failure here is remembered and never retried.
 type Surfaces = { trip: LiveActivityFactory<ActivityProps>; widget: Widget<WidgetProps>; after: (date: Date) => { after: Date } }
 let surfaces: Surfaces | null | undefined
 
 function load(): Surfaces {
+  if (surfaces === undefined && !Constants.expoConfig?.extra?.widgets) surfaces = null
   if (surfaces === undefined) {
     try {
       /* eslint-disable @typescript-eslint/no-require-imports */
@@ -94,8 +97,14 @@ export function updateCommuteWidget(entries: { at: number; props: WidgetProps }[
     const key = JSON.stringify(entries)
     if (key === lastWidget) return
     lastWidget = key
-    load().widget.updateTimeline(entries.map((e) => ({ date: new Date(e.at), props: e.props })))
+    load().widget.updateTimeline(entries.map((e) => ({ date: new Date(e.at), props: withoutNulls(e.props) })))
   } catch {
     // no widget extension in this build
   }
+}
+
+/** iOS keeps the widget's timeline in its settings store, which can't hold null: leave those fields out (the layout
+ *  only ever checks them with `!= null`, which is the same for a missing field). */
+function withoutNulls<T extends object>(props: T): T {
+  return Object.fromEntries(Object.entries(props).filter(([, v]) => v != null)) as T
 }

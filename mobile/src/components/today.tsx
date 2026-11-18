@@ -310,13 +310,19 @@ export function AwayToday({ away, active }: { away: boolean; active: boolean }) 
   )
 }
 
+/** When the trip should arrive by its forecast; null if the trip saved on the phone can't say (never throws). */
+function forecastEta(trip: ActiveTrip): string | null {
+  const t = new Date(trip.started_at).getTime() + Number(trip.forecast_p50) * 60_000
+  return Number.isFinite(t) ? new Date(t).toISOString() : null
+}
+
 /** A trip is under way: a bar on every tab that opens the live view. */
 export function TripBar() {
   const p = usePalette()
   const trip = useActiveTrip()
   const { data: live } = useLiveTrip(trip?.id ?? null, null)
   if (!trip || (live && live.status !== 'active')) return null
-  const eta = live?.eta ?? new Date(new Date(trip.started_at).getTime() + trip.forecast_p50 * 60_000).toISOString()
+  const eta = live?.eta ?? forecastEta(trip)
   return (
     <Pressable
       accessibilityRole="button"
@@ -352,7 +358,7 @@ export function TripInProgress({ trip }: { trip: ActiveTrip }) {
   const p = usePalette()
   const { data: live } = useLiveTrip(trip.id, null)
   const ended = live && live.status !== 'active'
-  const fallbackEta = new Date(new Date(trip.started_at).getTime() + trip.forecast_p50 * 60_000).toISOString()
+  const fallbackEta = forecastEta(trip)
   return (
     <View style={{ gap: 16 }} accessibilityLiveRegion="polite">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

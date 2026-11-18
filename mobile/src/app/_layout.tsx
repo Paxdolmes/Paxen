@@ -14,8 +14,19 @@ import { activityProps } from '@/lib/surface-data'
 import { api } from '@/lib/api'
 import { initPush } from '@/lib/push'
 import { startRecommended } from '@/lib/trip-actions'
+import { installErrorHandler, reportError } from '@/lib/errors'
+import { Boundary, ScreenNote } from '@/components/boundary'
 
 void SplashScreen.preventAutoHideAsync().catch(() => {})
+
+/** Open a screen from a notification. Safe before the screens are ready: it tries again shortly instead of failing. */
+function go(route: string, tries = 0) {
+  try {
+    router.push(route as never)
+  } catch {
+    if (tries < 10) setTimeout(() => go(route, tries + 1), 500)
+  }
+}
 
 // Live data refreshes on a timer while the app is in front, and straight away when you come back to it.
 const swrConfig = { isOnline: () => true, isVisible: () => AppState.currentState === 'active' }
@@ -50,11 +61,11 @@ export default function RootLayout() {
     () =>
       initPush(
         {
-          open: (route) => router.push(route as never),
+          open: (route) => go(route),
           startTrip: (commuteId) =>
             void startRecommended(commuteId)
-              .then((ok) => router.push((ok ? '/live' : `/routes?commute=${commuteId}`) as never))
-              .catch(() => router.push('/' as never)),
+              .then((ok) => go(ok ? '/live' : `/routes?commute=${commuteId}`))
+              .catch(() => go('/')),
           away: () =>
             void api
               .patchMe({ away_today: true })
@@ -69,6 +80,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => next === 'active' && revalidateAll())
+    installErrorHandler() // again, in case a library replaced it while loading
     return () => sub.remove()
   }, [])
 
@@ -78,16 +90,26 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <SWRConfig value={swrConfig}>
-        <TripOnLockScreen />
+        <Boundary level="silent">
+          <TripOnLockScreen />
+        </Boundary>
         <ThemeProvider value={theme}>
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.canvas } }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="onboarding" options={{ gestureEnabled: false, animation: 'fade' }} />
-            <Stack.Screen name="live" options={{ presentation: 'fullScreenModal' }} />
-          </Stack>
+          <Boundary level="screen" onRetry={() => void revalidateAll()}>
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: p.canvas } }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="onboarding" options={{ gestureEnabled: false, animation: 'fade' }} />
+              <Stack.Screen name="live" options={{ presentation: 'fullScreenModal' }} />
+            </Stack>
+          </Boundary>
           <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
         </ThemeProvider>
       </SWRConfig>
     </SafeAreaProvider>
   )
+}
+
+/** Expo Router shows this if the layout above fails (the boundaries inside it catch everything else). */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  useEffect(() => reportError(error, 'screen'), [error])
+  return <ScreenNote error={error} onRetry={() => void retry()} />
 }

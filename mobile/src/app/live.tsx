@@ -18,6 +18,7 @@ import { Text } from '@/components/text'
 import TripMap from '@/components/trip-map'
 import { ConfidenceBadge, LineChip } from '@/components/transit'
 import { Button, Card, ErrorText, Skeleton } from '@/components/ui'
+import { Boundary } from '@/components/boundary'
 
 function phaseText(t: LiveTrip): string {
   const leg = t.legs[t.current_leg ?? 0]
@@ -145,7 +146,16 @@ function useBoardingQuestion(trip: LiveTrip | undefined) {
   return { snap, done }
 }
 
+/** The live trip, in its own boundary: if it can't be drawn, Try again goes back to Today. */
 export default function LiveTripScreen() {
+  return (
+    <Boundary level="screen" onRetry={() => router.replace('/')}>
+      <LiveTripView />
+    </Boundary>
+  )
+}
+
+function LiveTripView() {
   const active = useActiveTrip()
   const p = usePalette()
   const insets = useSafeAreaInsets()

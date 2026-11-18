@@ -297,7 +297,7 @@ export function AxisLabels({ axis }: { axis: TimeAxis }) {
     <View importantForAccessibility="no-hide-descendants" style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
       {ticks.map((t) => (
         <Text key={t} tone="tertiary" tabular style={{ fontSize: 12, lineHeight: 16 }}>
-          {fmtTime(new Date(t).toISOString())}
+          {Number.isFinite(t) ? fmtTime(new Date(t).toISOString()) : ''}
         </Text>
       ))}
     </View>

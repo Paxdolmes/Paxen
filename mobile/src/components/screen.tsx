@@ -6,6 +6,7 @@ import { layout } from '@/shared/paxen-tokens'
 import { useDashboard } from '@/lib/hooks'
 import { usePalette } from '@/lib/theme'
 import { Text } from './text'
+import { Boundary } from './boundary'
 import { TripBar } from './today'
 import { Wordmark } from './transit'
 import { Chip } from './ui'
@@ -53,7 +54,11 @@ export function Screen({
           )}
         </View>
       </View>
-      {tripBar && <TripBar />}
+      {tripBar && (
+        <Boundary level="silent">
+          <TripBar />
+        </Boundary>
+      )}
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: 8, paddingBottom: 32, gap }}
@@ -64,7 +69,9 @@ export function Screen({
             {title}
           </Text>
         )}
-        {children}
+        <Boundary level="card" label="This screen" onRetry={() => void onRefresh?.()}>
+          {children}
+        </Boundary>
       </ScrollView>
     </View>
   )
