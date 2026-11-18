@@ -32,9 +32,13 @@ preview. `EXPO_PUBLIC_PAXEN_API_URL` points it at another API (default: producti
    `.p8` text), and optionally `APNS_TOPIC` if the bundle id differs. Redeploy.
 
 ## Each build
-GitHub > **Actions** > **iPhone app to TestFlight** > **Run workflow** (about 20-30 minutes on a cloud Mac, roughly
-£1 of Actions minutes, so it isn't run on every merge). The build number goes up
-automatically. When it's processed (another 5-30 minutes), add yourself in App Store Connect > the app >
+GitHub > **Actions** > **iPhone app to TestFlight** > **Run workflow** (about 20-30 minutes on a cloud Mac; the
+repository is public, so GitHub's standard Mac runners cost nothing). The build number goes up automatically.
+
+If a run sits at "Queued" and is cancelled after about 15 minutes without starting, GitHub didn't hand out a Mac
+for that label (it happened to builds 11, 14, 15 and 17-20). Run it again with **runner** set to a specific version
+(`macos-26`, then `macos-15`). The build switches to the newest Xcode 26 on the runner if its default is older,
+because App Store Connect only accepts builds made with Xcode 26 or later. When it's processed (another 5-30 minutes), add yourself in App Store Connect > the app >
 **TestFlight > Internal Testing**, and install it with the **TestFlight** app on your iPhone.
 
 ## Notes
