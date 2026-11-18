@@ -274,6 +274,19 @@ class AppSecret(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class AppError(Base):
+    """A JavaScript error the iPhone app ran into (mobile/src/lib/errors.ts), for fixing it: technical details only,
+    no account, place or position. Only the most recent ones are kept (APP_ERRORS_KEEP in main.py)."""
+    __tablename__ = "app_errors"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # fatal / error / screen / card / promise
+    build: Mapped[str | None] = mapped_column(String(20))
+    platform: Mapped[str | None] = mapped_column(String(10))
+    message: Mapped[str] = mapped_column(String(1000))
+    stack: Mapped[str | None] = mapped_column(Text)
+
+
 class ContextEvent(Base):
     """A run of something seen in the live context: a line status, station disruption, lift outage or planned
     works. One row per run (first seen to last seen), so it can be kept permanently. See paxen/context.py."""
