@@ -21,7 +21,7 @@ concurrency: testflight
 jobs:
   testflight:
     runs-on: ${{ inputs.runner || 'macos-latest' }}
-    timeout-minutes: 60
+    timeout-minutes: 120  # an Intel Mac (macos-15-intel) takes much longer than an Apple-silicon one
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
