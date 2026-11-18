@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import Constants from 'expo-constants'
 import useSWR, { mutate as globalMutate } from 'swr'
 import type { Dashboard, Preference } from '@/shared/types'
 import { api, tokenStore } from './api'
@@ -16,22 +17,35 @@ const swrOpts = { revalidateOnFocus: true, shouldRetryOnError: false } as const
 const dashStore = persisted('paxen.dashboard')
 const DASH_KEEP_MS = 30 * 60_000 // older than this is no use for a commute: show the loading state instead
 const who = (token: string | null | undefined) => (token ? token.slice(-12) : '')
+// A copy saved by another version of the app may have another shape: only this build's own copy is used.
+const BUILD = String(Constants.expoConfig?.ios?.buildNumber ?? Constants.expoConfig?.version ?? '')
 
 async function fetchDashboard() {
   const data = await api.dashboard()
-  dashStore.set(JSON.stringify({ who: who(tokenStore.get()), at: Date.now(), data }))
-  updateCommuteWidget(widgetEntries(data)) // the home-screen widget shows the same answer
+  dashStore.set(JSON.stringify({ who: who(tokenStore.get()), build: BUILD, at: Date.now(), data }))
+  try {
+    updateCommuteWidget(widgetEntries(data)) // the home-screen widget shows the same answer
+  } catch {
+    // the widget is an extra: never let it stop Today loading
+  }
   return data
 }
 
+type Saved = { who: string; build?: string; at: number; data: Dashboard }
+let parsed: { raw: string; saved: Saved | null } | null = null // read once, however many screens ask
+
 function savedDashboard(raw: string | null | undefined, token: string | null | undefined): Dashboard | undefined {
   if (!raw || !token) return undefined
-  try {
-    const saved = JSON.parse(raw) as { who: string; at: number; data: Dashboard }
-    return saved.who === who(token) && Date.now() - saved.at < DASH_KEEP_MS ? saved.data : undefined
-  } catch {
-    return undefined
+  if (parsed?.raw !== raw) {
+    let saved: Saved | null = null
+    try {
+      saved = JSON.parse(raw) as Saved
+    } catch {}
+    parsed = { raw, saved }
   }
+  const saved = parsed.saved
+  const usable = saved?.data && saved.who === who(token) && saved.build === BUILD && Date.now() - saved.at < DASH_KEEP_MS
+  return usable ? saved.data : undefined
 }
 
 export function useDashboard(enabled = true) {
