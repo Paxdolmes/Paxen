@@ -11,9 +11,9 @@ on:
         type: boolean
         default: false
       runner:
-        description: "Mac to build on (if macos-latest isn't being given a Mac, try a specific version)"
+        description: "Mac to build on (macos-15-intel if GitHub is short of Apple-silicon Macs: queued, then cancelled)"
         type: choice
-        options: [macos-latest, macos-26, macos-15]
+        options: [macos-latest, macos-26, macos-15, macos-15-intel]
         default: macos-latest
 
 concurrency: testflight
