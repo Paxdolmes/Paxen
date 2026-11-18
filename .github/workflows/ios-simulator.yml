@@ -54,12 +54,14 @@ jobs:
           grep -n -E "error:|fatal error|\*\* .* FAILED \*\*" "$log" | cut -c1-400 | head -n 80
           tail -n 60 "$log" | cut -c1-600
           exit 1
-      - name: Open the app and watch it for a minute
+      - name: Open the app with a set-up account, twice, and watch it
         run: |
           set +e
           out="$RUNNER_TEMP/sim"; mkdir -p "$out"
+          api="$EXPO_PUBLIC_PAXEN_API_URL"
           app=$(find "$RUNNER_TEMP/dd/Build/Products/Release-iphonesimulator" -maxdepth 1 -name "*.app" | head -1)
-          echo "app: $app"
+          bundle=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")
+          echo "app: $app ($bundle)"
           udid=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           d = json.load(sys.stdin)["devices"]
@@ -72,28 +74,52 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           xcrun simctl install "$udid" "$app"
-          bundle=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")
-          xcrun simctl launch --console-pty "$udid" "$bundle" > "$out/console.log" 2>&1 &
-          sleep 75
-          xcrun simctl io "$udid" screenshot "$out/screen.png"
-          if xcrun simctl spawn "$udid" launchctl list | grep -q "UIKitApplication:$bundle"; then
-            echo "RESULT: still running after 75 seconds"
-          else
-            echo "RESULT: NOT running after 75 seconds (crashed or quit)"
-          fi
-          echo "::group::App console (last 200 lines)"
-          tail -n 200 "$out/console.log" | cut -c1-500
-          echo "::endgroup::"
+          xcrun simctl privacy "$udid" grant location-always "$bundle"
+          xcrun simctl privacy "$udid" grant notifications "$bundle" 2>/dev/null
+          # A temporary production account set up like a real one (Home, Work, commutes), deleted at the end, so
+          # the app opens on Today with real data, as on a phone
+          tok=$(curl -s -X POST "$api/v1/users" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          echo "::add-mask::$tok"
+          echo "$tok" > "$RUNNER_TEMP/token"
+          curl -s -o /dev/null -w "onboarding: %{http_code}\n" -X POST "$api/v1/onboarding" -H "Authorization: Bearer $tok" \
+            -H "Content-Type: application/json" -d '{"home":{"label":"home","name":"Orford Road","lat":51.5826,"lon":-0.0128},"work":{"label":"work","name":"Regent Street","lat":51.5141,"lon":-0.1405}}'
+          curl -s -o /dev/null -w "dashboard: %{http_code}\n" "$api/v1/dashboard" -H "Authorization: Bearer $tok"
+          container=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+          store="$container/Library/Application Support/$bundle/RCTAsyncLocalStorage_V1"
+          mkdir -p "$store"
+          printf '{"paxen.token":"%s"}' "$tok" > "$store/manifest.json"
+          running() { xcrun simctl spawn "$udid" launchctl list | grep -q "UIKitApplication:$bundle"; }
+          for n in 1 2; do
+            xcrun simctl launch --console-pty "$udid" "$bundle" > "$out/console-$n.log" 2>&1 &
+            sleep 70
+            xcrun simctl io "$udid" screenshot "$out/screen-$n.png"
+            if running; then echo "RESULT launch $n: still running after 70 seconds"; else echo "RESULT launch $n: NOT running after 70 seconds (crashed or quit)"; fi
+            echo "::group::Launch $n: app console (last 150 lines)"
+            tail -n 150 "$out/console-$n.log" | cut -c1-600
+            echo "::endgroup::"
+            grep -n -i -E "terminating app|uncaught exception|reason:|exception '|was thrown while invoking|fatal" "$out/console-$n.log" | head -20
+            xcrun simctl terminate "$udid" "$bundle" 2>/dev/null
+            sleep 3
+          done
+          ls -la "$store" > "$out/storage.txt" 2>&1
           echo "::group::Crash reports"
           for f in ~/Library/Logs/DiagnosticReports/*; do
-            case "$f" in *Paxen*|*paxen*) echo "== $f"; cp "$f" "$out/"; head -c 30000 "$f"; echo;; esac
+            case "$f" in *Paxen*|*paxen*) echo "== $f"; cp "$f" "$out/"; head -c 40000 "$f"; echo;; esac
           done
           echo "::endgroup::"
-          echo "::group::System log for the app (last 3 minutes)"
-          xcrun simctl spawn "$udid" log show --last 3m --style compact \
-            --predicate 'process == "Paxen" OR eventMessage CONTAINS[c] "paxen"' 2>/dev/null | tail -n 300 | cut -c1-500
+          echo "::group::System log for the app (last 6 minutes)"
+          xcrun simctl spawn "$udid" log show --last 6m --style compact --predicate 'process == "Paxen"' 2>/dev/null \
+            | grep -v -E "^Timestamp|libnetwork|nw_" | tail -n 400 | cut -c1-500
           echo "::endgroup::"
           exit 0
+      - name: Delete the temporary account
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/token" ]; then
+            curl -s -o /dev/null -w "deleted: %{http_code}\n" -X DELETE "$EXPO_PUBLIC_PAXEN_API_URL/v1/me" \
+              -H "Authorization: Bearer $(cat "$RUNNER_TEMP/token")"
+            rm -f "$RUNNER_TEMP/token"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
