@@ -213,3 +213,30 @@ these hold:
 
 If both qualify, the one with the lower MAE at h = 30 is chosen. The report shows this as `amendment3`, next to
 the registered `decision`.
+
+### Result of Amendment 3 (24 November 2026): no change, the rules stay
+
+Scored on the 7 test days from 17 to 23 November, as registered (evaluation of 24 November, 03:12 UTC; replay
+version 3). Recording into the database was paused from 19 November 13:10 UTC (disk safety switch). Those days
+were rebuilt from the raw archive. Every test day was tracked from 00:00 to 23:59 with no outages.
+
+| h = 30, mean over 17–23 Nov | MAE | MAE vs rules | days beating rules | F1, slow around this time | coverage |
+|---|---|---|---|---|---|
+| rules | 4.77 | | | 0.169 | |
+| usual | 3.29 | −31% | | 0.000 | |
+| usual_status | 4.62 | −3.3% | 6 of 7 | 0.195 | |
+| journey_gbm | 3.23 | −32% | | 0.035 | 0.79 |
+| journey_gbm_status | 3.23 | −32% | 7 of 7 | 0.053 | 0.79 |
+
+At h = 60: usual_status 4.46 against 4.68 (−4.7%, 6 of 7 days); journey_gbm_status 3.25 (−31%, 7 of 7 days,
+coverage 0.79, F1 0.046 against 0.162).
+
+- **usual_status** fails on accuracy. It is only 3.3% (h = 30) and 4.7% (h = 60) better than the rules, short of
+  the 5% required. It passes the F1 check and is the best of all at flagging a slow time (0.195).
+- **journey_gbm_status** fails on F1. It is far more accurate (about 31% lower MAE, every day, coverage in range),
+  but it rarely flags a slow time (F1 0.053 against the rules' 0.169).
+- The registered `decision` is also no_change (rules), so the briefing, leave-by and alerts keep using the rules.
+
+Seen, not acted on: the most accurate times (journey_gbm) and the best "slow" flags (usual_status) still come from
+different candidates. Any combination of the two would need its own amendment, written before the days it is
+scored on.
